@@ -519,6 +519,25 @@
         </div>
     </div>
     
+    <!-- Version Display -->
+    <div class="col-span-full text-center text-xs text-gray-500 dark:text-white/70 mt-8 mb-4">
+        <span id="appVersion">SpaceMap Analyzer</span>
+    </div>
+
+    <script>
+        // Fetch version from API and display
+        fetch('/api/env')
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.data.VERSION) {
+                    const v = data.data.VERSION;
+                    const vStr = v !== 'unknown' ? `v${v}` : '';
+                    document.getElementById('appVersion').textContent = `SpaceMap Analyzer ${vStr}`;
+                }
+            })
+            .catch(console.error);
+    </script>
+    
     <!-- Script to update chart colors -->
     <script src="app.js"></script>
 </body>

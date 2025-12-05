@@ -49,7 +49,21 @@ app.get('/api/authorized-content', async (req, res) => {
 });
 
 app.get('/api/env', (req, res) => {
-  res.json({ success: true, data: { TRIM_DATA_SHARE_PATHS: process.env.TRIM_DATA_SHARE_PATHS || '', PORT: process.env.PORT || '' } });
+  // Try to read version from package.json
+  let version = 'unknown';
+  try {
+    const pkg = require('./package.json');
+    version = pkg.version || 'unknown';
+  } catch (e) {}
+  
+  res.json({ 
+    success: true, 
+    data: { 
+      TRIM_DATA_SHARE_PATHS: process.env.TRIM_DATA_SHARE_PATHS || '', 
+      PORT: process.env.PORT || '',
+      VERSION: version
+    } 
+  });
 });
 
 // 文件类型分类
