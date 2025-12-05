@@ -1155,10 +1155,39 @@ async function loadSavedFolders() {
         selectedFolders = [];
         
         await loadSavedFolderPaths();
+        await loadAllowedPaths();
     } catch (error) {
         selectedFolders = [];
         savedFolderPaths = [];
         currentFolderIndex = 0;
+    }
+}
+
+// 加载Docker环境变量配置的允许路径
+async function loadAllowedPaths() {
+    try {
+        const response = await fetch('/api/allowed-paths');
+        if (response.ok) {
+            const result = await response.json();
+            if (result.success && Array.isArray(result.data)) {
+                let added = false;
+                result.data.forEach(p => {
+                    // 检查是否已存在（根据路径）
+                    if (!savedFolderPaths.some(f => f.path === p.path)) {
+                        savedFolderPaths.push(p);
+                        added = true;
+                    }
+                });
+                
+                // 如果有新增路径，保存并更新
+                if (added) {
+                    saveFolderPathsToLocal();
+                    console.log('自动添加了Docker环境变量配置的路径:', result.data);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('加载允许路径失败:', error);
     }
 }
 
