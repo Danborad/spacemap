@@ -21,7 +21,7 @@ version: '3'
 services:
   spacemap:
     # 使用官方镜像（请替换 username 为你的 Docker Hub 用户名）
-    image: username/spacemap:latest
+    image: zhong12138/spacemap:latest
     container_name: spacemap
     restart: unless-stopped
     ports:
