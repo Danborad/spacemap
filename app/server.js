@@ -117,59 +117,55 @@ async function writeJSON(filePath, value) {
 
 // 扫描目录（递归扫描所有文件）
 async function scanDirectory(dirPath, maxDepth = 50, currentDepth = 0) {
-    if (currentDepth >= maxDepth) return { files: [], folders: [], totalSize: 0 };
+    const files = [];
+    const folders = [];
     
-    try {
-        const items = await fs.readdir(dirPath, { withFileTypes: true });
-        const files = [];
-        const folders = [];
-        let totalSize = 0;
+    async function traverse(currentPath, depth) {
+        if (depth >= maxDepth) return 0;
         
-        for (const item of items) {
-            const fullPath = path.join(dirPath, item.name);
+        let dirSize = 0;
+        try {
+            const items = await fs.readdir(currentPath, { withFileTypes: true });
             
-            try {
-                if (item.isDirectory()) {
-                    // 递归扫描子文件夹
-                    const subResult = await scanDirectory(fullPath, maxDepth, currentDepth + 1);
-                    
-                    // 计算当前文件夹的总大小（文件 + 子文件夹）
-                    const currentFolderSize = subResult.totalSize;
-                    totalSize += currentFolderSize;
-                    
-                    // 添加当前文件夹信息
-                    folders.push({
-                        name: item.name,
-                        path: fullPath,
-                        size: currentFolderSize
-                    });
-                    
-                    // 合并子结果
-                    files.push(...subResult.files);
-                    folders.push(...subResult.folders);
-                } else if (item.isFile()) {
-                    const stats = await fs.stat(fullPath);
-                    const fileSize = stats.size;
-                    totalSize += fileSize;
-                    
-                    files.push({
-                        name: item.name,
-                        path: fullPath,
-                        size: fileSize,
-                        type: getFileType(item.name),
-                        modified: stats.mtime
-                    });
+            for (const item of items) {
+                const fullPath = path.join(currentPath, item.name);
+                
+                try {
+                    if (item.isDirectory()) {
+                        // 递归扫描子文件夹
+                        const subDirSize = await traverse(fullPath, depth + 1);
+                        dirSize += subDirSize;
+                        
+                        // 添加当前文件夹信息
+                        folders.push({
+                            name: item.name,
+                            path: fullPath,
+                            size: subDirSize
+                        });
+                    } else if (item.isFile()) {
+                        const stats = await fs.stat(fullPath);
+                        dirSize += stats.size;
+                        
+                        files.push({
+                            name: item.name,
+                            path: fullPath,
+                            size: stats.size,
+                            type: getFileType(item.name),
+                            modified: stats.mtime
+                        });
+                    }
+                } catch (error) {
+                    console.error(`Error processing ${fullPath}:`, error.message);
                 }
-            } catch (error) {
-                console.error(`Error processing ${fullPath}:`, error.message);
             }
+        } catch (error) {
+            console.error(`Error reading directory ${currentPath}:`, error.message);
         }
-        
-        return { files, folders, totalSize };
-    } catch (error) {
-        console.error(`Error reading directory ${dirPath}:`, error.message);
-        return { files: [], folders: [], totalSize: 0 };
+        return dirSize;
     }
+
+    const totalSize = await traverse(dirPath, currentDepth);
+    return { files, folders, totalSize };
 }
 
 // 扫描目录（仅直接子项，用于子文件夹显示）
@@ -429,10 +425,14 @@ app.post('/api/scan', async (req, res) => {
       await ensureDataFile(SCAN_HISTORY_FILE, {});
       const allHist = await readJSON(SCAN_HISTORY_FILE, {});
       const time = Date.now();
+
+      // Create lightweight history data (remove large arrays)
+      const { allFiles, allFolders, largeFiles, ...historyData } = data;
+
       if (Array.isArray(paths)) {
         for (const p of paths) {
           const list = Array.isArray(allHist[p]) ? allHist[p] : [];
-          list.push({ timestamp: time, data });
+          list.push({ timestamp: time, data: historyData });
           if (list.length > 100) list.splice(0, list.length - 100);
           allHist[p] = list;
         }

@@ -1359,23 +1359,27 @@ function updateUI(data) {
     // 保存完整数据到全局变量
     currentScanData = data;
     console.log('updateUI: 保存完整数据到 currentScanData:', currentScanData);
-    console.log('updateUI: allFiles 数量:', data.allFiles?.length);
-    console.log('updateUI: allFiles 内容:', data.allFiles);
     
-    // 更新概览卡片
+    // 更新概览卡片 (立即执行)
     document.getElementById('totalFiles').textContent = data.totalFiles.toLocaleString();
     document.getElementById('totalFolders').textContent = data.totalFolders.toLocaleString();
     document.getElementById('totalSize').textContent = formatBytes(data.totalSize);
-    document.getElementById('averageSize').textContent = formatBytes((() => { try { const list = Array.isArray(data.allFiles) ? data.allFiles : []; if (!list.length) return 0; let max = 0; for (let i=0;i<list.length;i++){ const s=list[i].size||0; if (s>max) max=s;} return max; } catch(_) { return 0; } })());
     
-    // 更新图表
-    try { updateFileTypeChart(); } catch (e) { console.error('更新文件类型图表失败:', e); }
-    try { updateFolderSizeChart(); } catch (e) { console.error('更新文件夹大小图表失败:', e); }
-    try { updateTrendChart(); } catch (e) { console.error('更新趋势图失败:', e); }
+    // 更新最大文件大小 (异步)
+    setTimeout(() => {
+        document.getElementById('averageSize').textContent = formatBytes((() => { try { const list = Array.isArray(data.allFiles) ? data.allFiles : []; if (!list.length) return 0; let max = 0; for (let i=0;i<list.length;i++){ const s=list[i].size||0; if (s>max) max=s;} return max; } catch(_) { return 0; } })());
+    }, 10);
     
-    // 更新文件列表
-    filteredFiles = data.largeFiles || [];
-    renderCurrentList();
+    // 更新图表 (分批异步执行，避免阻塞UI)
+    setTimeout(() => { try { updateFileTypeChart(); } catch (e) { console.error('更新文件类型图表失败:', e); } }, 100);
+    setTimeout(() => { try { updateFolderSizeChart(); } catch (e) { console.error('更新文件夹大小图表失败:', e); } }, 300);
+    setTimeout(() => { try { updateTrendChart(); } catch (e) { console.error('更新趋势图失败:', e); } }, 500);
+    
+    // 更新文件列表 (异步)
+    setTimeout(() => {
+        filteredFiles = data.largeFiles || [];
+        renderCurrentList();
+    }, 200);
 }
 
 // 更新文件类型图表
@@ -1455,9 +1459,12 @@ function saveScanToHistory() {
     if (!currentScanData || !selectedFolders.length) return;
     
     const historyKey = selectedFolders[0].path;
+    // Create a lightweight version of scan data for history
+    // Remove large arrays to prevent localStorage quota exceeded and performance issues
+    const { allFiles, allFolders, largeFiles, ...summaryData } = currentScanData;
     const scanRecord = {
         timestamp: Date.now(),
-        data: { ...currentScanData } // 深拷贝数据
+        data: summaryData
     };
     
     // 初始化该路径的历史记录（如果不存在）
@@ -2774,6 +2781,15 @@ function toggleDuplicateMode(mode) {
     renderCurrentList();
 }
 
+let timelinePage = 1;
+const timelineItemsPerPage = 5;
+
+function changeTimelinePage(delta) {
+    timelinePage += delta;
+    if (timelinePage < 1) timelinePage = 1;
+    renderTimeline();
+}
+
 function renderTimeline() {
     const container = document.getElementById('timelineContainer');
     if (!container) return;
@@ -2796,22 +2812,28 @@ function renderTimeline() {
     // Sort by timestamp desc
     allHistory.sort((a, b) => b.timestamp - a.timestamp);
     
-    // Take top 10
-    allHistory = allHistory.slice(0, 10);
+    const totalItems = allHistory.length;
+    const totalPages = Math.ceil(totalItems / timelineItemsPerPage);
+    
+    if (timelinePage > totalPages && totalPages > 0) timelinePage = totalPages;
+    if (timelinePage < 1) timelinePage = 1;
 
-    const html = allHistory.map((item, index) => {
+    const start = (timelinePage - 1) * timelineItemsPerPage;
+    const pageItems = allHistory.slice(start, start + timelineItemsPerPage);
+
+    const listHtml = pageItems.map((item, index) => {
         const date = new Date(item.timestamp);
         const timeStr = date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
         const sizeStr = formatBytes(item.data.totalSize);
         
         return `
-            <div class="relative">
+            <div class="relative mb-4 last:mb-0">
                 <div class="absolute -left-[25px] top-1 w-4 h-4 rounded-full bg-indigo-500 border-4 border-white dark:border-slate-800"></div>
                 <div class="mb-1 flex justify-between items-center">
                     <span class="text-xs font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded">${timeStr}</span>
                     <span class="text-xs text-slate-400">${sizeStr}</span>
                 </div>
-                <div class="text-sm font-medium text-slate-700 dark:text-slate-200">${item.path}</div>
+                <div class="text-sm font-medium text-slate-700 dark:text-slate-200 truncate" title="${item.path}">${item.path}</div>
                 <div class="text-xs text-slate-500 mt-1">
                     ${item.data.totalFiles.toLocaleString()} 个文件 · ${item.data.totalFolders.toLocaleString()} 个文件夹
                 </div>
@@ -2819,7 +2841,15 @@ function renderTimeline() {
         `;
     }).join('');
 
-    container.innerHTML = html || '<div class="text-sm text-slate-500">暂无历史记录</div>';
+    const controlsHtml = totalItems > timelineItemsPerPage ? `
+        <div class="flex justify-between items-center mt-4 pt-2 border-t border-slate-200 dark:border-slate-700">
+            <button onclick="changeTimelinePage(-1)" ${timelinePage <= 1 ? 'disabled' : ''} class="text-xs px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">上一页</button>
+            <span class="text-xs text-slate-500">${timelinePage} / ${totalPages}</span>
+            <button onclick="changeTimelinePage(1)" ${timelinePage >= totalPages ? 'disabled' : ''} class="text-xs px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">下一页</button>
+        </div>
+    ` : '';
+
+    container.innerHTML = (listHtml || '<div class="text-sm text-slate-500">暂无历史记录</div>') + controlsHtml;
 }
 
 function toggleSelectAll(master) {
