@@ -4,20 +4,17 @@
 
 ## 第一步：准备 GitHub 仓库
 
-1.  **初始化 Git 仓库**（如果你还没做过）：
-    在项目根目录 `g:\1qoder\cursor\spacemap` 打开终端运行：
-    ```bash
-    git init
-    git add .
-    git commit -m "Initial commit"
-    ```
+1.  **初始化 Git 仓库**（已完成）：
+    本项目 `docker` 目录已初始化为独立的 Git 仓库。
+    请确保在 `g:\1qoder\cursor\spacemap\fpk开发\docker` 目录下执行后续命令。
 
 2.  **创建 GitHub 仓库**：
-    - 登录 GitHub，创建一个新仓库（例如命名为 `spacemap`）。
+    - 登录 GitHub，创建一个新仓库（例如命名为 `spacemap-docker`）。
     - 按照 GitHub 页面提示，将本地代码推送到远程仓库：
       ```bash
+      # 确保你在 docker 目录下
       git branch -M main
-      git remote add origin https://github.com/你的用户名/spacemap.git
+      git remote add origin https://github.com/你的用户名/spacemap-docker.git
       git push -u origin main
       ```
 

@@ -13,8 +13,34 @@
 ### 1. 构建并启动
 确保已安装 Docker 和 Docker Compose。
 
+你可以直接使用以下的 `docker-compose.yml` 模板：
+
+```yaml
+version: '3'
+
+services:
+  spacemap:
+    # 使用官方镜像（请替换 username 为你的 Docker Hub 用户名）
+    image: username/spacemap:latest
+    container_name: spacemap
+    restart: unless-stopped
+    ports:
+      - "7080:7080"
+    volumes:
+      - ./data:/app/data
+      # 示例：映射宿主机目录到容器内，并设置为只读
+      - /your/host/media:/media:ro
+    environment:
+      - PORT=7080
+      # 设置自动识别的扫描路径，多个路径用冒号 : 分隔
+      # 这里的路径必须与 volumes 中映射的容器内路径一致
+      - TRIM_DATA_SHARE_PATHS=/media
+```
+
+将上述内容保存为 `docker-compose.yml`，然后运行：
+
 ```bash
-docker-compose up -d --build
+docker-compose up -d
 ```
 
 ### 2. 访问应用
