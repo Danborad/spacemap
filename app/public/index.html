@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script>
+        // Immediately apply theme based on system preference to avoid FOUC
+        (function() {
+            try {
+                const saved = localStorage.getItem('themeMode');
+                const mode = saved || 'auto';
+                const isDark = mode === 'dark' || (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                if (isDark) {
+                    document.documentElement.classList.add('dark');
+                    document.documentElement.classList.remove('light');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                    document.documentElement.classList.add('light');
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        })();
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <title>SpaceMap - 存储空间分析器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet"/>
+    <script src="echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                    colors: {
+                        glass: {
+                            100: 'rgba(255, 255, 255, 0.1)',
+                            200: 'rgba(255, 255, 255, 0.2)',
+                            300: 'rgba(255, 255, 255, 0.3)',
+                            border: 'rgba(255, 255, 255, 0.1)',
+                            surface: 'rgba(0, 0, 0, 0.4)',
+                        },
+                        accent: {
+                            primary: '#6366f1', // Indigo 500
+                            secondary: '#8b5cf6', // Violet 500
+                            pink: '#ec4899', // Pink 500
+                            cyan: '#06b6d4', // Cyan 500
+                        }
+                    },
+                    boxShadow: {
+                        'glass': '0 8px 32px 0 rgba(0, 0, 0, 0.37)',
+                        'neon': '0 0 10px rgba(99, 102, 241, 0.5), 0 0 20px rgba(99, 102, 241, 0.3)',
+                    },
+                    animation: {
+                        'blob': 'blob 7s infinite',
+                        'fade-in': 'fadeIn 0.5s ease-out forwards',
+                    },
+                    keyframes: {
+                        blob: {
+                            '0%': { transform: 'translate(0px, 0px) scale(1)' },
+                            '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
+                            '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
+                            '100%': { transform: 'translate(0px, 0px) scale(1)' },
+                        },
+                        fadeIn: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        }
+                    }
+                }
+            }
+        };
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .glass-panel {
+                @apply bg-white border border-slate-200 rounded-2xl shadow-sm transition-all duration-300 hover:shadow-md 
+                dark:bg-gray-900/40 dark:backdrop-blur-xl dark:border-white/10 dark:shadow-glass dark:hover:bg-gray-800/50 dark:hover:border-white/20;
+            }
+            .glass-btn {
+                @apply px-4 py-2 rounded-lg transition-all duration-200 text-sm font-medium flex items-center gap-2
+                bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 shadow-sm hover:shadow
+                dark:bg-white/10 dark:border-white/10 dark:text-white dark:hover:bg-white/20 dark:shadow-none dark:backdrop-blur-sm;
+            }
+            .glass-btn-primary {
+                @apply px-4 py-2 rounded-lg transition-all duration-200 text-sm font-medium flex items-center gap-2
+                bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm hover:shadow-md border border-transparent
+                dark:bg-accent-primary dark:hover:bg-accent-primary/80 dark:border-white/10;
+            }
+            .glass-input {
+                @apply bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all
+                dark:bg-black/20 dark:border-white/10 dark:text-gray-200 dark:focus:border-accent-primary/50 dark:focus:ring-accent-primary/50;
+            }
+            .text-glow {
+                text-shadow: 0 0 10px rgba(255,255,255,0.3);
+            }
+            .no-scrollbar::-webkit-scrollbar { display: none; }
+            .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+            
+            /* Custom Scrollbar for non-hidden areas */
+            ::-webkit-scrollbar { width: 6px; height: 6px; }
+            ::-webkit-scrollbar-track { background: transparent; }
+            ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+            ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+        }
+        
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+        }
+        
+        .animated-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: -1;
+            overflow: hidden;
+            background: #020617;
+            will-change: transform, opacity;
+            contain: paint;
+        }
+        .top-blend {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(120deg, rgba(2,6,23,0.95) 0%, rgba(15,23,42,0.9) 50%, rgba(2,6,23,0.95) 100%);
+            pointer-events: none;
+        }
+        .light .top-blend {
+            background: linear-gradient(180deg, #94a3b8 0%, #cbd5e1 20%, #f1f5f9 100%);
+        }
+        
+            .blob {
+                position: absolute;
+                filter: blur(48px);
+                opacity: 0.25;
+                pointer-events: none;
+                animation: blob 20s infinite ease-in-out;
+                will-change: transform, opacity;
+            }
+
+            .light body { background-color: #f1f5f9; color: #1e293b; }
+            .light .animated-bg { 
+                background: #f1f5f9;
+                opacity: 1;
+            }
+            .light .blob { opacity: 0.08; filter: blur(80px); }
+            @media (prefers-reduced-motion: reduce) {
+                .blob { animation: none; }
+            }
+
+            .light thead { background-color: #f8fafc !important; border-bottom: 1px solid #e2e8f0 !important; }
+            .light thead th { color: #64748b !important; font-weight: 600 !important; }
+            .light .text-white { color: #1e293b !important; }
+            .light .text-gray-200 { color: #334155 !important; }
+            .light .text-gray-300 { color: #475569 !important; }
+            .light .text-gray-400 { color: #64748b !important; }
+            .light .text-gray-500 { color: #64748b !important; }
+            .light .text-gray-600 { color: #475569 !important; }
+            .text-text-primary { color: #e2e8f0; }
+            .text-text-secondary { color: #94a3b8; }
+            .text-text-tertiary { color: #64748b; }
+            .light .text-text-primary { color: #1e293b; }
+            .light .text-text-secondary { color: #475569; }
+            .light .text-text-tertiary { color: #64748b; }
+            .bg-primary { background-color: #6366f1 !important; }
+            .text-primary { color: #6366f1 !important; }
+            .border-primary { border-color: #6366f1 !important; }
+            
+            /* Theme Dropdown */
+            .light #themeDropdown { 
+                background-color: #ffffff !important; 
+                border: 1px solid #e2e8f0 !important; 
+                color: #1e293b !important; 
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+            }
+            .light #themeDropdown button { color: #475569 !important; }
+            .light #themeDropdown button:hover { background-color: #f1f5f9 !important; color: #0f172a !important; }
+            .light #themeDropdown button[data-theme].text-accent-primary { color: #2563eb !important; background-color: #eff6ff !important; }
+            
+            /* Folder Dropdown */
+            .light #folderDropdown { 
+                background-color: #ffffff !important; 
+                border: 1px solid #e2e8f0 !important; 
+                color: #1e293b !important;
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+            }
+            .light #folderDropdown .text-gray-200 { color: #334155 !important; }
+            .light #folderDropdown .text-gray-400 { color: #64748b !important; }
+            .light #folderDropdown .hover\:bg-white\/5:hover { background-color: #f1f5f9 !important; }
+            
+            /* Table Borders in Light Mode */
+            .light tr.border-t { border-color: #f1f5f9 !important; }
+            .light tr:hover { background-color: #f8fafc !important; }
+            
+            .light #appLogo {
+                background-color: #5B72FF !important;
+                background-image: none !important;
+                box-shadow: 0 10px 15px -3px rgba(91, 114, 255, 0.25), 0 4px 6px -2px rgba(91, 114, 255, 0.12) !important;
+            }
+    </style>
+</head>
+<body class="font-sans min-h-screen selection:bg-accent-primary/30 selection:text-white overflow-x-hidden">
+
+    <!-- Animated Background -->
+    <div class="animated-bg">
+        <div class="blob bg-accent-primary w-96 h-96 rounded-full top-0 left-0 mix-blend-multiply animate-blob"></div>
+        <div class="blob bg-accent-secondary w-96 h-96 rounded-full top-0 right-0 mix-blend-multiply animate-blob animation-delay-2000"></div>
+        <div class="blob bg-accent-pink w-96 h-96 rounded-full -bottom-8 left-20 mix-blend-multiply animate-blob animation-delay-4000"></div>
+        <div class="blob bg-accent-cyan w-80 h-80 rounded-full bottom-0 right-20 mix-blend-multiply animate-blob animation-delay-2000" style="opacity:0.2;"></div>
+        <div class="top-blend"></div>
+    </div>
+
+    <!-- Main Grid Layout -->
+    <div class="max-w-[1600px] mx-auto p-4 md:p-6 lg:p-8 grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 auto-rows-min">
+        
+        <!-- Header Section (Span 4) -->
+        <header class="col-span-full relative overflow-visible z-50">
+            <div class="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                <div class="flex items-center gap-4">
+                    <div id="appLogo" class="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-[#5B72FF] flex-shrink-0 flex items-center justify-center shadow-lg">
+                        <svg viewBox="0 0 24 24" class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <ellipse cx="12" cy="5" rx="7" ry="3"></ellipse>
+                            <path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5"></path>
+                            <path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"></path>
+                        </svg>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <h1 class="text-lg md:text-[clamp(1.5rem,3vw,2rem)] font-bold tracking-tight text-gray-900 dark:text-white whitespace-nowrap overflow-hidden text-ellipsis">存储空间分析器</h1>
+                        <p class="text-gray-500 dark:text-white/80 text-xs mt-1 md:mt-2 whitespace-nowrap overflow-hidden text-ellipsis">分析扫描路径内文件大小及占用排名</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 self-end md:self-auto">
+                    <button id="themeToggleBtn" class="px-3 md:px-4 h-8 md:h-10 rounded-full bg-white text-slate-700 shadow-sm hover:shadow dark:bg-white/10 dark:text-white dark:hover:bg-white/20 dark:border-transparent transition-colors"><i id="themeIcon" class="fas fa-sun"></i></button>
+                    <button id="folderSettingsBtn" onclick="showFolderSettings()" class="px-3 md:px-4 h-8 md:h-10 rounded-full bg-white text-slate-700 shadow-sm hover:shadow dark:bg-white/10 dark:text-white dark:hover:bg-white/20 dark:border-transparent transition-colors text-xs md:text-base whitespace-nowrap">设置</button>
+                    <div class="relative">
+                        <button id="feedbackBtn" class="px-3 md:px-4 h-8 md:h-10 rounded-full bg-white text-slate-700 shadow-sm hover:shadow dark:bg-white/10 dark:text-white dark:hover:bg-white/20 dark:border-transparent transition-colors text-xs md:text-base whitespace-nowrap">反馈</button>
+                        <div id="feedbackPopover" class="absolute top-full right-0 mt-2 w-64 p-4 rounded-xl bg-white border border-slate-200 shadow-xl hidden z-50 dark:bg-[#1e293b] dark:border-white/10">
+                            <div class="text-sm text-slate-500 dark:text-gray-400 mb-2">如果你有改进建议，可以邮件联系：</div>
+                            <button id="feedbackEmailBtn" class="flex items-center gap-3 w-full p-2 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors text-slate-700 dark:bg-white/5 dark:hover:bg-white/10 dark:text-white/90 text-sm group">
+                                <div class="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-600 group-hover:text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-400 dark:group-hover:text-indigo-300">
+                                    <i class="fas fa-envelope"></i>
+                                </div>
+                                <span>1948863412@qq.com</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div class="flex items-center gap-2 md:gap-3">
+                    <div class="relative group flex-1 md:flex-none">
+                        <button id="selectFolderBtn" class="w-full md:w-auto justify-center px-4 py-2 md:px-5 md:py-2 rounded-full bg-white text-indigo-600 shadow-sm ring-1 ring-black/5 font-semibold flex items-center gap-2 dark:bg-white/10 dark:text-white dark:ring-0 dark:hover:bg-white/20 transition-colors text-sm md:text-base" onclick="toggleFolderDropdown()">
+                            <i class="fas fa-folder"></i>
+                            <span class="truncate max-w-[120px] md:max-w-none">切换文件夹</span>
+                        </button>
+                        <div id="folderDropdown" class="absolute top-full left-0 mt-2 w-72 rounded-2xl bg-[#0f172a] text-gray-200 border border-white/10 shadow-glass p-2 hidden z-50 origin-top-left transform transition-all duration-200 light:bg-white light:text-[#0f172a]"></div>
+                    </div>
+                    <button id="rescanBtn" class="flex-1 md:flex-none justify-center px-4 py-2 md:px-5 md:py-2 rounded-full bg-white text-slate-700 shadow-sm hover:shadow font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white/10 dark:text-white dark:hover:bg-white/20 dark:border-transparent transition-colors text-sm md:text-base" onclick="rescanFolders()" disabled>
+                        <i class="fas fa-sync-alt"></i>
+                        <span>重新扫描</span>
+                    </button>
+                </div>
+                <div id="lastUpdatedText" class="text-xs text-gray-500 dark:text-white/70 text-center md:text-right">上次更新：尚未扫描</div>
+            </div>
+            <div id="themeDropdown" class="absolute top-14 right-0 mt-2 w-40 rounded-2xl bg-[#0f172a] text-gray-200 border border-white/10 shadow-glass p-2 hidden z-50 origin-top-right transform transition-all duration-200">
+                <button class="w-full text-left px-3 py-2 rounded hover:bg-white/10" data-theme="dark">深色</button>
+                <button class="w-full text-left px-3 py-2 rounded hover:bg-white/10" data-theme="light">浅色</button>
+                <button class="w-full text-left px-3 py-2 rounded hover:bg-white/10" data-theme="auto">跟随系统</button>
+            </div>
+        </header>
+
+        <!-- Status Bar (Hidden by default) -->
+        <div id="scanStatus" class="col-span-full hidden glass-panel p-4 border-l-4 border-accent-primary bg-accent-primary/10">
+            <div class="flex items-center gap-3">
+                <div class="animate-spin w-5 h-5 border-2 border-accent-primary border-t-transparent rounded-full"></div>
+                <span class="text-accent-primary font-medium">正在深度扫描文件系统，请稍候...</span>
+            </div>
+        </div>
+
+        <!-- Stats Cards (1 Col each) -->
+        <!-- Total Size -->
+        <div class="glass-panel p-6 flex flex-col justify-between relative overflow-hidden group">
+            <div class="absolute -right-6 -top-6 w-24 h-24 bg-accent-primary/20 rounded-full blur-2xl group-hover:bg-accent-primary/30 transition-all"></div>
+            <div class="flex justify-between items-start z-10">
+                <div class="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-accent-primary">
+                    <i class="fas fa-hdd"></i>
+                </div>
+                <span id="sizeChangePill" class="text-xs font-bold px-2 py-1 rounded-lg bg-green-500/20 text-green-400">+0%</span>
+            </div>
+            <div class="mt-4 z-10">
+                <h3 id="totalSize" class="text-3xl font-bold text-gray-900 dark:text-white tracking-tight whitespace-nowrap">0 B</h3>
+                <p class="text-gray-400 text-sm mt-1 whitespace-nowrap">总占用空间</p>
+            </div>
+        </div>
+
+        <!-- Total Files -->
+        <div class="glass-panel p-6 flex flex-col justify-between relative overflow-hidden group">
+            <div class="absolute -right-6 -top-6 w-24 h-24 bg-accent-secondary/20 rounded-full blur-2xl group-hover:bg-accent-secondary/30 transition-all"></div>
+            <div class="flex justify-between items-start z-10">
+                <div class="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-accent-secondary">
+                    <i class="fas fa-file-alt"></i>
+                </div>
+                <span id="fileCountChangePill" class="text-xs font-bold px-2 py-1 rounded-lg bg-white/10 text-gray-300">0%</span>
+            </div>
+            <div class="mt-4 z-10">
+                <h3 id="totalFiles" class="text-3xl font-bold text-gray-900 dark:text-white tracking-tight whitespace-nowrap">0</h3>
+                <p class="text-gray-400 text-sm mt-1 whitespace-nowrap">总文件数</p>
+            </div>
+        </div>
+
+        <!-- Total Folders -->
+        <div class="glass-panel p-6 flex flex-col justify-between relative overflow-hidden group">
+            <div class="absolute -right-6 -top-6 w-24 h-24 bg-accent-pink/20 rounded-full blur-2xl group-hover:bg-accent-pink/30 transition-all"></div>
+            <div class="flex justify-between items-start z-10">
+                <div class="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-accent-pink">
+                    <i class="far fa-folder"></i>
+                </div>
+                <span id="folderCountChangePill" class="text-xs font-bold px-2 py-1 rounded-lg bg-white/10 text-gray-300">0%</span>
+            </div>
+            <div class="mt-4 z-10">
+                <h3 id="totalFolders" class="text-3xl font-bold text-gray-900 dark:text-white tracking-tight whitespace-nowrap">0</h3>
+                <p class="text-gray-400 text-sm mt-1 whitespace-nowrap">总文件夹数</p>
+            </div>
+        </div>
+
+        <!-- Largest File -->
+        <div class="glass-panel p-6 flex flex-col justify-between relative overflow-hidden group">
+            <div class="absolute -right-6 -top-6 w-24 h-24 bg-accent-cyan/20 rounded-full blur-2xl group-hover:bg-accent-cyan/30 transition-all"></div>
+            <div class="flex justify-between items-start z-10">
+                <div class="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-accent-cyan">
+                    <i class="fas fa-bolt"></i>
+                </div>
+                <span class="text-xs font-bold px-2 py-1 rounded-lg bg-accent-cyan/20 text-accent-cyan">Max</span>
+            </div>
+            <div class="mt-4 z-10">
+                <h3 id="averageSize" class="text-3xl font-bold text-gray-900 dark:text-white tracking-tight whitespace-nowrap">0 B</h3>
+                <p class="text-gray-400 text-sm mt-1 whitespace-nowrap">最大文件</p>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        
+        <!-- Bar Chart (Main, Span 3) -->
+        <div class="col-span-full lg:col-span-3 glass-panel p-6 flex flex-col">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">文件夹大小排名</h3>
+                </div>
+                <select id="folderSizeFilter" class="glass-input text-xs cursor-pointer" onchange="updateFolderSizeChart()">
+                    <option value="10">Top 10</option>
+                    <option value="20">Top 20</option>
+                    <option value="50">Top 50</option>
+                </select>
+            </div>
+            <div class="flex-1 min-h-[300px] w-full relative">
+                <canvas id="barChart"></canvas>
+                <div id="barChartLabels" class="absolute top-0 left-0 w-full h-full pointer-events-none"></div>
+            </div>
+        </div>
+
+        <!-- Pie Chart (Side, Span 1) -->
+        <div class="col-span-full lg:col-span-1 glass-panel p-6 flex flex-col">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h3 class="text-lg font-semibold text-white">类型分布</h3>
+                    <p class="text-xs text-gray-500">File Types</p>
+                </div>
+                <select id="fileTypeFilter" class="glass-input text-xs w-20" onchange="updateFileTypeChart()">
+                    <option value="all">全部</option>
+                    <option value="image">图片</option>
+                    <option value="video">视频</option>
+                    <option value="audio">音频</option>
+                    <option value="document">文档</option>
+                    <option value="archive">压缩</option>
+                    <option value="code">代码</option>
+                    <option value="other">其他</option>
+                </select>
+            </div>
+            <div class="flex-1 min-h-[250px] relative flex items-center justify-center">
+                <canvas id="pieChart"></canvas>
+            </div>
+        </div>
+
+        
+
+        <!-- File List (Full Width) -->
+        <div class="col-span-full glass-panel overflow-hidden flex flex-col">
+            <div class="p-4 sm:p-6 border-b border-slate-100 dark:border-white/5 flex flex-row justify-between items-center gap-2 sm:gap-4">
+                <div class="flex items-center gap-2 sm:gap-4">
+                    <h3 id="fileListTitle" class="text-base sm:text-lg font-semibold text-slate-900 dark:text-white whitespace-nowrap w-32 sm:w-48">文件详情</h3>
+                    <div class="bg-slate-100 dark:bg-black/20 p-1 rounded-lg flex border border-slate-200 dark:border-white/5">
+                        <button id="btn-large" onclick="toggleDuplicateMode('large')" class="px-2 sm:px-4 py-1.5 rounded-md text-xs font-semibold bg-white text-indigo-600 shadow-sm ring-1 ring-black/5 transition-all dark:bg-accent-primary dark:text-white dark:shadow-lg dark:shadow-accent-primary/20 dark:ring-0 whitespace-nowrap">大文件</button>
+                        <button id="btn-dup" onclick="toggleDuplicateMode('duplicates')" class="px-2 sm:px-4 py-1.5 rounded-md text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white/50 transition-all dark:text-gray-400 dark:hover:text-white dark:hover:bg-white/5 whitespace-nowrap">重复文件</button>
+                    </div>
+                </div>
+                
+                <div class="flex gap-2 w-auto">
+                     <button id="bulkDeleteBtn" class="hidden glass-btn border-red-200 bg-red-50 text-red-600 hover:bg-red-100 hover:border-red-300 dark:bg-red-500/10 dark:hover:bg-red-500/20 dark:text-red-400 dark:border-red-500/20 px-2 sm:px-4 whitespace-nowrap" onclick="bulkDeleteFiles()">
+                        <i class="fas fa-trash-alt"></i> <span class="hidden sm:inline">批量删除</span><span class="sm:hidden">删除</span>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-slate-50 dark:bg-black/20 text-slate-500 dark:text-gray-400 text-xs uppercase tracking-wider border-b border-slate-100 dark:border-white/5">
+                        <tr>
+                            <th class="px-3 py-3 font-semibold w-12 text-center">
+                                <input type="checkbox" id="selectAllFiles" onchange="toggleSelectAll(this)" class="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-accent-primary dark:focus:ring-accent-primary">
+                            </th>
+                            <th class="px-3 py-3 font-semibold">文件名</th>
+                            <th class="px-3 py-3 font-semibold">路径</th>
+                            <th class="px-3 py-3 font-semibold">大小</th>
+                            <th class="px-3 py-3 font-semibold">类型</th>
+                            <th class="px-3 py-3 font-semibold text-right">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fileTableBody" class="text-sm divide-y divide-slate-100 dark:divide-white/5 text-slate-600 dark:text-gray-300">
+                        <!-- Content via JS -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="p-4 border-t border-slate-100 dark:border-white/5 flex justify-center">
+                <button id="loadMoreBtn" class="glass-btn w-full sm:w-auto justify-center" onclick="showMoreFiles()">
+                    加载更多
+                </button>
+            </div>
+        </div>
+
+        <!-- Trend Chart (Bottom, Compact) -->
+        <div class="col-span-full glass-panel p-6 overflow-visible">
+            <div class="flex justify-between items-center mb-2">
+                <div>
+                    <h3 class="text-lg font-semibold text-white">扫描时间线</h3>
+                </div>
+                <div class="flex gap-2">
+                    <span class="w-3 h-3 rounded-full bg-accent-primary"></span>
+                    <span class="text-xs text-gray-400">总大小</span>
+                </div>
+            </div>
+            <div class="w-full h-[200px] pt-1">
+                <div id="sizeTrendChart" style="width:100%;height:100%;"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Modals -->
+    <!-- File Detail Modal -->
+    <div id="fileDetailModal" class="fixed inset-0 z-[100] hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onclick="document.getElementById('fileDetailModal').classList.add('hidden')"></div>
+        <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full max-w-lg p-6 glass-panel border border-white/20 shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold text-white">文件详情</h3>
+                <button onclick="document.getElementById('fileDetailModal').classList.add('hidden')" class="text-gray-400 hover:text-white transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="fileDetailContent" class="text-gray-300 space-y-4">
+                <!-- Content -->
+            </div>
+            <div class="mt-8 flex justify-end">
+                <button onclick="document.getElementById('fileDetailModal').classList.add('hidden')" class="glass-btn bg-accent-primary/20 hover:bg-accent-primary/30 text-white border-accent-primary/20">
+                    关闭
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Folder Settings Modal -->
+    <div id="folderSettingsModal" class="fixed inset-0 z-[100] hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onclick="closeFolderSettingsModal()"></div>
+        <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl p-6 glass-panel border border-white/20 shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold text-white">管理扫描路径</h3>
+                <button onclick="closeFolderSettingsModal()" class="text-gray-400 hover:text-white transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="folderSettingsList" class="text-gray-300 space-y-4">
+                <!-- JS render -->
+            </div>
+            <div class="mt-6 flex justify-end gap-2">
+                <button onclick="closeFolderSettingsModal()" class="glass-btn">关闭</button>
+                <button onclick="exportFolderPaths()" class="glass-btn">导出路径</button>
+                <label class="glass-btn cursor-pointer">导入路径<input type="file" accept="application/json" class="hidden" onchange="importFolderPaths(event)"></label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Folder Select Modal -->
+    <div id="folderModal" class="fixed inset-0 z-[100] hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onclick="closeFolderModal()"></div>
+        <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl p-6 glass-panel border border-white/20 shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold text-white">添加或选择文件夹</h3>
+                <button onclick="closeFolderModal()" class="text-gray-400 hover:text-white transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="availableFolders" class="text-gray-300 space-y-4">
+                <!-- JS render -->
+            </div>
+            <div class="mt-6 flex justify-end">
+                <button onclick="closeFolderModal()" class="glass-btn">关闭</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Script to update chart colors -->
+    <script src="app.js"></script>
+</body>
+</html>

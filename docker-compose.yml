@@ -1,0 +1,19 @@
+version: '3'
+
+services:
+  spacemap:
+    build: .
+    container_name: spacemap
+    restart: unless-stopped
+    ports:
+      - "7080:7080"
+    volumes:
+      - ./data:/app/data
+      # 示例：映射宿主机目录到容器内，并设置为只读
+      - /your/host/media:/media:ro
+    environment:
+      - PORT=7080
+      # 设置自动识别的扫描路径，多个路径用冒号 : 分隔
+      # 这里的路径必须与 volumes 中映射的容器内路径一致
+      - TRIM_DATA_SHARE_PATHS=/media
+    network_mode: host

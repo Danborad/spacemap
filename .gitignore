@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Application Data
+data/*
+!data/.gitkeep
+
+# Environment
+.env
+
+# System
+.DS_Store
