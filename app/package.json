@@ -1,6 +1,6 @@
 {
   "name": "spacemap-analyzer",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "硬盘文件占用分析工具",
   "main": "server.js",
   "scripts": {

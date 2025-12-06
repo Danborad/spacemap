@@ -1365,21 +1365,35 @@ function updateUI(data) {
     document.getElementById('totalFolders').textContent = data.totalFolders.toLocaleString();
     document.getElementById('totalSize').textContent = formatBytes(data.totalSize);
     
-    // 更新最大文件大小 (异步)
-    setTimeout(() => {
-        document.getElementById('averageSize').textContent = formatBytes((() => { try { const list = Array.isArray(data.allFiles) ? data.allFiles : []; if (!list.length) return 0; let max = 0; for (let i=0;i<list.length;i++){ const s=list[i].size||0; if (s>max) max=s;} return max; } catch(_) { return 0; } })());
-    }, 10);
-    
-    // 更新图表 (分批异步执行，避免阻塞UI)
-    setTimeout(() => { try { updateFileTypeChart(); } catch (e) { console.error('更新文件类型图表失败:', e); } }, 100);
-    setTimeout(() => { try { updateFolderSizeChart(); } catch (e) { console.error('更新文件夹大小图表失败:', e); } }, 300);
-    setTimeout(() => { try { updateTrendChart(); } catch (e) { console.error('更新趋势图失败:', e); } }, 500);
-    
-    // 更新文件列表 (异步)
-    setTimeout(() => {
-        filteredFiles = data.largeFiles || [];
-        renderCurrentList();
-    }, 200);
+    // Update average/max size safely
+    try {
+        const list = Array.isArray(data.allFiles) ? data.allFiles : [];
+        let max = 0;
+        if (list.length > 0) {
+            for (let i=0; i<list.length; i++) {
+                const s = list[i].size || 0;
+                if (s > max) max = s;
+            }
+        }
+        document.getElementById('averageSize').textContent = formatBytes(max);
+    } catch (e) {
+        console.error('Error updating max size:', e);
+        document.getElementById('averageSize').textContent = '0 B';
+    }
+
+    // Use requestAnimationFrame to update charts without freezing UI
+    requestAnimationFrame(() => {
+        try { updateFileTypeChart(); } catch (e) { console.error('updateFileTypeChart failed:', e); }
+        try { updateFolderSizeChart(); } catch (e) { console.error('updateFolderSizeChart failed:', e); }
+        try { updateTrendChart(); } catch (e) { console.error('updateTrendChart failed:', e); }
+        
+        try {
+            filteredFiles = data.largeFiles || [];
+            renderCurrentList();
+        } catch (e) {
+            console.error('renderCurrentList failed:', e);
+        }
+    });
 }
 
 // 更新文件类型图表
