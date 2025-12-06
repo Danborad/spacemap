@@ -35,7 +35,7 @@ jobs:
         platforms: linux/amd64,linux/arm64
         push: true
         tags: |
-              ${{ secrets.DOCKERHUB_USERNAME }}/spacemap:latest
-              ${{ secrets.DOCKERHUB_USERNAME }}/spacemap:1.0.4
+            ${{ secrets.DOCKERHUB_USERNAME }}/spacemap:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/spacemap:1.0.5
         cache-from: type=gha
         cache-to: type=gha,mode=max
