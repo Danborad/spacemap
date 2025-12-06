@@ -6,7 +6,7 @@ WORKDIR /app
 COPY app/package*.json ./
 
 # Install production dependencies
-RUN npm install --production --registry=https://registry.npmmirror.com
+RUN npm install --production
 
 # Copy source code
 COPY app/ .
