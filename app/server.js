@@ -5,7 +5,7 @@ const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 7082;
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const SAVED_FOLDERS_FILE = path.join(DATA_DIR, 'saved-folders.json');
 const SCAN_HISTORY_FILE = path.join(DATA_DIR, 'scan-history.json');
 
