@@ -23,7 +23,7 @@ let scanHistory = {}; // 存储每个路径的扫描历史数据
 let themeMode = 'auto';
 let themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 let authorizedPaths = [];
-const FEEDBACK_EMAIL = '1948863412@qq.com';
+const FEEDBACK_EMAIL = 'https://github.com/Danborad/spacemap';
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
