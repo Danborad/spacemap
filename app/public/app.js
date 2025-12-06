@@ -1413,7 +1413,16 @@ function updateFileTypeChart() {
             fileTypes[type] = (fileTypes[type] || 0) + 1;
         });
     } else {
-        fileTypes = currentScanData.fileTypes || {};
+        // Use pre-calculated fileTypes from backend if available
+        if (currentScanData.fileTypes) {
+            fileTypes = currentScanData.fileTypes;
+        } else if (currentScanData.allFiles) {
+            currentScanData.allFiles.forEach(file => {
+                const ext = file.name.split('.').pop()?.toLowerCase() || 'unknown';
+                const type = getFileTypeFromExtension(ext);
+                fileTypes[type] = (fileTypes[type] || 0) + 1;
+            });
+        }
     }
     const groups = ['视频','图片','文档','其他'];
     let values = [fileTypes.video||0, fileTypes.image||0, fileTypes.document||0, (fileTypes.other||0)+(fileTypes.audio||0)+(fileTypes.archive||0)+(fileTypes.code||0)];
@@ -1447,13 +1456,19 @@ function updateFolderSizeChart() {
         return !(/[\\\/]/.test(rest));
     }
     let displayItems = [];
-    if (roots.length) {
+    if (roots.length && allFolders.length > 0) {
         roots.forEach(root => {
             allFolders.forEach(f => { if (isDirectChild(f.path, root)) { displayItems.push({ name: f.name, displayName: f.name.length>15?f.name.substring(0,15)+'...':f.name, type:'folder', path:f.path, size:f.size }); } });
             allFiles.forEach(file => { if (isDirectChild(file.path, root)) { displayItems.push({ name:file.name, displayName:file.name&&file.name.length>15?file.name.substring(0,15)+'...':(file.name||''), type:'file', path:file.path, size:file.size }); } });
         });
     } else {
-        displayItems = (currentScanData.folderSizes || []).map(f => ({ name:f.name, displayName:f.name.length>15?f.name.substring(0,15)+'...':f.name, type:'folder', path:f.path, size:f.size }));
+        // Fallback to folderSizes from backend if available
+        if (currentScanData.folderSizes) {
+            displayItems = currentScanData.folderSizes.map(f => ({ name:f.name, displayName:f.name.length>15?f.name.substring(0,15)+'...':f.name, type:'folder', path:f.path, size:f.size }));
+        } else {
+            // If nothing available, empty list
+            displayItems = [];
+        }
     }
     displayItems.sort((a,b) => b.size - a.size);
     const actualItems = displayItems.slice(0, Math.min(limit, displayItems.length));

@@ -422,8 +422,8 @@ app.post('/api/scan', async (req, res) => {
       const allHist = await readJSON(SCAN_HISTORY_FILE, {});
       const time = Date.now();
 
-      // Create lightweight history data (remove large arrays)
-      const { allFiles, allFolders, largeFiles, ...historyData } = data;
+      // Create lightweight history data (keep necessary summary data)
+      const { allFiles, allFolders, ...historyData } = data;
 
       if (Array.isArray(paths)) {
         for (const p of paths) {
