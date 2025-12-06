@@ -116,9 +116,7 @@ async function writeJSON(filePath, value) {
 }
 
 // 扫描目录（递归扫描所有文件）
-async function scanDirectory(dirPath, maxDepth = 50, currentDepth = 0) {
-    const files = [];
-    const folders = [];
+async function scanDirectory(dirPath, maxDepth = 50, files = [], folders = []) {
     
     async function traverse(currentPath, depth) {
         if (depth >= maxDepth) return 0;
@@ -164,7 +162,7 @@ async function scanDirectory(dirPath, maxDepth = 50, currentDepth = 0) {
         return dirSize;
     }
 
-    const totalSize = await traverse(dirPath, currentDepth);
+    const totalSize = await traverse(dirPath, 0);
     return { files, folders, totalSize };
 }
 
@@ -378,14 +376,12 @@ app.post('/api/scan', async (req, res) => {
       }
       try {
         console.log(`开始扫描路径: ${dirPath}`);
-        const result = await scanDirectory(dirPath, maxDepth);
+        // 直接传入 allFiles 和 allFolders 进行填充，避免大数组合并开销
+        const result = await scanDirectory(dirPath, maxDepth, allFiles, allFolders);
         
-        // 合并结果
-        allFiles.push(...result.files);
-        allFolders.push(...result.folders);
         totalSize += result.totalSize;
         
-        console.log(`路径 ${dirPath} 扫描完成: ${result.files.length} 个文件, ${result.folders.length} 个文件夹, 总大小 ${formatFileSize(result.totalSize)}`);
+        console.log(`路径 ${dirPath} 扫描完成: ${result.files.length} 个文件 (累计), ${result.folders.length} 个文件夹 (累计), 总大小 ${formatFileSize(result.totalSize)}`);
       } catch (error) {
         console.error(`Error scanning ${dirPath}:`, error.message);
       }
