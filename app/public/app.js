@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initEventListeners();
     // loadScanResults();
     loadSavedFolders(); // 加载保存的文件夹路径
-    // loadScanHistoryFromLocal(); // 加载扫描历史
+    loadScanHistoryFromServer(); // 加载扫描历史
     updateLastScanStatus();
     
     // 如果有保存的文件夹路径，更新按钮显示
@@ -1577,18 +1577,17 @@ function saveScanHistoryToLocal() {
     }
 }
 
-// 从本地存储加载扫描历史
-function loadScanHistoryFromLocal() {
-    try {
-        const saved = localStorage.getItem('spacemap-scan-history');
-        if (saved) {
-            scanHistory = JSON.parse(saved);
-        }
-        renderTimeline();
-    } catch (error) {
-        console.error('加载扫描历史失败:', error);
-        scanHistory = {};
-    }
+// 从服务器加载扫描历史
+function loadScanHistoryFromServer() {
+    fetch('/api/scan-history')
+        .then(r => r.json())
+        .then(r => {
+            if (r.success && r.data) {
+                scanHistory = r.data;
+                renderTimeline();
+            }
+        })
+        .catch(e => console.error('加载历史失败', e));
 }
 function updateTrendChart(period = 'week') {
     if (!window.sizeTrendChart) return;
@@ -1914,13 +1913,13 @@ function updateFileTable() {
                     <div class="w-6 h-6 rounded-lg flex items-center justify-center mr-2 transition-colors" style="${iconContainerStyle}">
                         <i class="fas ${getFileIcon(file.type)}" style="${iconStyle}"></i>
                     </div>
-                    <span class="text-xs font-medium text-gray-200 truncate max-w-[200px]" title="${file.name}">
+                    <span class="text-xs font-medium text-gray-200 truncate max-w-[400px]" title="${file.name}">
                         ${file.name || '未知文件'}
                     </span>
                 </div>
             </td>
             <td class="px-3 py-2">
-                <div class="text-xs text-gray-500 truncate max-w-[300px]" title="${file.path}">${file.path}</div>
+                <div class="text-xs text-gray-500 truncate max-w-[500px]" title="${file.path}">${file.path}</div>
             </td>
             <td class="px-3 py-2 font-mono text-xs text-gray-300">
                 ${formatBytes(file.size)}
@@ -2343,8 +2342,6 @@ function showFileDetails(fileRef) {
 // 文件夹钻取功能
 function drillDownFolder(folderName) {
     console.log('drillDownFolder 被调用，查找文件夹:', folderName);
-    console.log('currentDisplayFolders:', currentDisplayFolders);
-    console.log('currentScanData.folderSizes:', currentScanData?.folderSizes);
     
     // 查找文件夹：从多个数据源中查找
     let folder = null;
@@ -2352,36 +2349,30 @@ function drillDownFolder(folderName) {
     // 1. 优先从当前显示的文件夹中查找
     if (currentDisplayFolders && currentDisplayFolders.length > 0) {
         folder = currentDisplayFolders.find(f => f.name === folderName);
-        console.log('在 currentDisplayFolders 中找到的文件夹:', folder);
     }
     
     // 2. 如果没找到，从原始数据中查找
     if (!folder && currentScanData && currentScanData.folderSizes) {
         folder = currentScanData.folderSizes.find(f => f.name === folderName);
-        console.log('在 currentScanData.folderSizes 中找到的文件夹:', folder);
     }
     
     // 3. 如果还是没找到，从所有文件夹数据中查找（包括子文件夹）
     if (!folder && currentScanData && currentScanData.allFolders) {
         folder = currentScanData.allFolders.find(f => f.name === folderName);
-        console.log('在 currentScanData.allFolders 中找到的文件夹:', folder);
     }
     
     // 4. 最后尝试从当前路径下的所有文件夹中查找
     if (!folder && currentFolderPath) {
-        // 从当前扫描数据中查找当前路径下的文件夹
         const currentPathFolders = (currentScanData.folderSizes || []).filter(f => {
             const fp = String(f.path || '');
             const cp = String(currentFolderPath || '');
             return fp.startsWith(cp + '/') || fp === cp;
         });
         folder = currentPathFolders.find(f => f.name === folderName);
-        console.log('在当前路径下找到的文件夹:', folder);
     }
     
     if (!folder) {
         console.error('未找到文件夹:', folderName);
-        console.error('可用的文件夹名称:', currentDisplayFolders.map(f => f.name));
         return;
     }
     
@@ -2389,7 +2380,7 @@ function drillDownFolder(folderName) {
     folderNavigationStack.push({
         folderPath: currentFolderPath,
         folderSizes: currentDisplayFolders.length > 0 ? currentDisplayFolders : currentScanData.folderSizes,
-        chartTitle: ((document.querySelector('#barChart').closest('.glass') || document.querySelector('#barChart').closest('.card'))?.querySelector('h3')?.textContent) || '文件夹大小排名',
+        chartTitle: ((document.querySelector('#barChart').closest('.glass-panel') || document.querySelector('#barChart').closest('.card'))?.querySelector('h3')?.textContent) || '文件夹大小排名',
         filteredFiles: filteredFiles,
         fileTableTitle: (document.getElementById('fileListTitle')?.textContent) || '大文件列表'
     });
@@ -2397,52 +2388,32 @@ function drillDownFolder(folderName) {
     // 设置当前文件夹路径
     currentFolderPath = folder.path;
     
-    // 同时过滤文件和扫描子文件夹
+    // 过滤文件
     filterFilesByFolder(folderName);
-    scanSubFolders(folder.path);
+
+    // 更新图表（使用本地数据）
+    // 从 allFolders 中查找子文件夹
+    const subFolders = (currentScanData.allFolders || []).filter(f => {
+        const fp = String(f.path || '').replace(/\\/g, '/');
+        const cp = String(folder.path || '').replace(/\\/g, '/');
+        // 直接子文件夹: 路径以父路径开头，且相对路径中不包含更多斜杠
+        if (!fp.startsWith(cp + '/')) return false;
+        const rel = fp.slice(cp.length + 1);
+        return !rel.includes('/');
+    });
+
+    const directFiles = (currentScanData.allFiles || []).filter(f => {
+        const fp = String(f.path || '').replace(/\\/g, '/');
+        const cp = String(folder.path || '').replace(/\\/g, '/');
+        if (!fp.startsWith(cp + '/')) return false;
+        const rel = fp.slice(cp.length + 1);
+        return !rel.includes('/');
+    });
+
+    updateFolderSizeChartWithLocalData(subFolders, directFiles);
 }
 
-// 扫描子文件夹
-async function scanSubFolders(folderPath) {
-    try {
-        showScanStatus(true);
-        
-        console.log('开始扫描子文件夹:', folderPath);
-        
-        const response = await fetch('/api/scan-subfolders', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                folderPath: folderPath,
-                limit: parseInt(document.getElementById('folderSizeFilter').value)
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        console.log('扫描子文件夹返回结果:', result);
-        
-        if (result.folderSizes !== undefined) {
-            // 更新文件夹大小图表显示子文件夹
-            updateFolderSizeChartWithSubFolders(result.folderSizes, result.files);
-            showScanStatus(false);
-        } else {
-            throw new Error(result.error || '未知错误');
-        }
-    } catch (error) {
-        console.error('扫描子文件夹错误:', error);
-        alert('扫描子文件夹失败: ' + error.message);
-        showScanStatus(false);
-    }
-}
-
-// 更新文件夹大小图表显示子文件夹
-function updateFolderSizeChartWithSubFolders(subFolders, directFiles) {
+function updateFolderSizeChartWithLocalData(subFolders, directFiles) {
     const limit = parseInt(document.getElementById('folderSizeFilter').value);
     
     // 保存当前显示的数据，用于点击判断
@@ -2453,10 +2424,9 @@ function updateFolderSizeChartWithSubFolders(subFolders, directFiles) {
     let currentDisplayItems = [];
     let chartTitle = '';
     
-    // 合并真实的子文件夹和直接文件（包括压缩包）
+    // 合并真实的子文件夹和直接文件
     let displayItems = [];
     
-    // 添加真实的子文件夹
     if (subFolders && subFolders.length > 0) {
         subFolders.forEach(folder => {
             displayItems.push({
@@ -2469,7 +2439,6 @@ function updateFolderSizeChartWithSubFolders(subFolders, directFiles) {
         });
     }
     
-    // 添加直接文件（包括压缩包）
     if (directFiles && directFiles.length > 0) {
         directFiles.forEach(file => {
             displayItems.push({
@@ -2492,30 +2461,17 @@ function updateFolderSizeChartWithSubFolders(subFolders, directFiles) {
         currentDisplayItems = actualDisplayItems.map(d => ({ name: d.name, displayName: d.displayName, type: d.type, path: d.path, size: d.size }));
         currentDisplayFolders = actualDisplayItems.filter(i => i.type==='folder').map(i => ({ name:i.name, path:i.path, size:i.size }));
     } else {
-        // 如果没有任何内容，显示提示信息
         names = ['此文件夹为空'];
         sizes = [0];
         currentDisplayItems = [{ name: '此文件夹为空', type: 'empty', path: '', size: 0 }];
     }
     
-    // 设置图表标题，显示实际项目数量
+    // 设置图表标题
     const folderName = String(currentFolderPath || '').split(/[\\\/]/).pop();
-    chartTitle = `项目大小排名 - ${folderName} (共${displayItems.length}个，显示${actualDisplayItems.length}个)`;
+    chartTitle = `项目大小排名 - ${folderName}`;
     
-    console.log('子文件夹数量:', subFolders ? subFolders.length : 0);
-    console.log('直接文件数量:', directFiles ? directFiles.length : 0);
-    console.log('子文件夹列表:', subFolders ? subFolders.map(f => f.name) : []);
-    console.log('直接文件列表:', directFiles ? directFiles.map(f => f.name) : []);
-    console.log('实际显示项目数量:', actualDisplayItems.length);
-    console.log('显示的项目名称:', actualDisplayItems.map(d => d.name));
-    console.log('显示的项目类型:', actualDisplayItems.map(d => d.type));
-    
-    // 保存显示项目
     window.currentDisplayItems = currentDisplayItems;
     
-    console.log('显示项目:', currentDisplayItems);
-    
-    // 更新 Chart.js 数据
     if (window.barChart) {
         window.barChart.data.labels = names.map(x => String(x));
         window.barChart.data.datasets[0].data = sizes.map(x => Number(x) || 0);
@@ -2523,109 +2479,58 @@ function updateFolderSizeChartWithSubFolders(subFolders, directFiles) {
         setTimeout(() => { if (window.renderBarLabels) window.renderBarLabels(); }, 0);
     }
     
-    // 更新图表标题和添加返回按钮
-    const chartEl = document.querySelector('#barChart');
-    if (chartEl) {
-        const chartContainer = chartEl.closest('.glass') || chartEl.closest('.card') || chartEl.parentElement;
-        const chartTitleElement = chartContainer && chartContainer.querySelector('h3');
-        if (chartTitleElement) {
-            chartTitleElement.innerHTML = `
-                <div class="flex items-center justify-between">
-                    <span>${chartTitle}</span>
-                    <button onclick="goBackToParentFolder()" class="flex items-center px-3 py-1 bg-gray-100 text-gray-600 text-sm rounded-md hover:bg-gray-200 transition-colors">
-                        <i class="fas fa-arrow-left mr-1"></i>
-                        返回上级
-                    </button>
-                </div>
-            `;
-        }
-    }
-
-    if (directFiles && directFiles.length) {
-        const sorted = directFiles.slice().sort((a, b) => b.size - a.size);
-        filteredFiles = sorted;
-        renderCurrentList();
-        if (currentListMode === 'duplicates') updateDuplicateTable();
-        const fileTableTitle = document.getElementById('fileListTitle');
-        if (fileTableTitle) {
-            fileTableTitle.textContent = `文件夹 "${folderName}" 内的大文件 (${sorted.length} 个)`;
-        }
+    // 更新图表标题和返回按钮
+    const chartContainer = document.querySelector('#barChart')?.closest('.glass-panel');
+    if (chartContainer) {
+        const titleEl = chartContainer.querySelector('h3');
+        if (titleEl) titleEl.textContent = chartTitle;
+        
+        const backBtn = document.getElementById('chartBackBtn');
+        if (backBtn) backBtn.classList.remove('hidden');
     }
 }
 
-// 返回上级文件夹
-function goBackToParentFolder() {
-    if (folderNavigationStack.length === 0) {
-        // 如果没有导航历史，重新加载原始数据
-        updateFolderSizeChart();
-        const chartEl = document.querySelector('#barChart');
-        if (chartEl) {
-            const chartTitle = chartEl.closest('.card').querySelector('h3');
-            if (chartTitle) chartTitle.innerHTML = '文件夹大小排名';
+function navigateBack() {
+    if (folderNavigationStack.length > 0) {
+        const prevState = folderNavigationStack.pop();
+        currentFolderPath = prevState.folderPath;
+        currentDisplayFolders = prevState.folderSizes;
+        filteredFiles = prevState.filteredFiles;
+        
+        // 恢复标题
+        if (prevState.fileTableTitle) {
+            const ft = document.getElementById('fileListTitle');
+            if (ft) ft.textContent = prevState.fileTableTitle;
         }
-        currentFolderPath = null;
-        return;
-    }
-    
-    // 从导航栈中恢复上一个状态
-    const previousState = folderNavigationStack.pop();
-    currentFolderPath = previousState.folderPath;
-    
-    // 恢复图表数据
-    const limit = parseInt(document.getElementById('folderSizeFilter').value);
-    const allFolders = previousState.folderSizes.sort((a, b) => b.size - a.size);
-    // 只取实际存在的文件夹数量
-    const folders = allFolders.slice(0, Math.min(limit, allFolders.length));
-    
-    // Format names consistent with other charts
-    const names = folders.map(f => {
-        let displayName = f.name;
-        if (displayName.length > 15) displayName = displayName.substring(0, 15) + '...';
-        return (f.type === 'file' ? '📄 ' : '📁 ') + displayName;
-    });
-    const sizes = folders.map(f => (f.size / (1024 * 1024 * 1024)));
-    currentDisplayItems = folders.map(f => ({ name: f.name, type: 'folder', path: f.path, size: f.size }));
-    window.currentDisplayItems = currentDisplayItems;
-    
-    if (window.barChart) {
-        window.barChart.data.labels = names.map(x => String(x));
-        window.barChart.data.datasets[0].data = sizes.map(x => Number(x) || 0);
-        window.barChart.update();
-        setTimeout(() => { if (window.renderBarLabels) window.renderBarLabels(); }, 0);
-    }
-    
-    // 恢复图表标题
-    const chartEl = document.querySelector('#barChart');
-    if (chartEl) {
-        const chartTitle = (chartEl.closest('.glass') || chartEl.closest('.card') || chartEl.parentElement).querySelector('h3');
-        if (chartTitle) {
-            if (currentFolderPath) {
-                const folderName = currentFolderPath.split(/[\\\/]/).pop();
-                chartTitle.innerHTML = `
-                    <div class="flex items-center justify-between">
-                        <span>文件夹大小排名 - ${folderName}</span>
-                        <button onclick="goBackToParentFolder()" class="flex items-center px-3 py-1 bg-gray-100 text-gray-600 text-sm rounded-md hover:bg-gray-200 transition-colors">
-                            <i class="fas fa-arrow-left mr-1"></i>
-                            返回上级
-                        </button>
-                    </div>
-                `;
-            } else {
-                chartTitle.innerHTML = '文件夹大小排名';
-            }
+        
+        const chartContainer = document.querySelector('#barChart')?.closest('.glass-panel');
+        if (chartContainer && prevState.chartTitle) {
+            chartContainer.querySelector('h3').textContent = prevState.chartTitle;
         }
-    }
-    
-    // 恢复文件列表状态
-    if (previousState.filteredFiles) {
-        filteredFiles = previousState.filteredFiles;
-        renderCurrentList();
-    }
-    
-    // 恢复文件列表标题
-    if (previousState.fileTableTitle) {
-        const fileTableTitle = document.getElementById('fileListTitle');
-        fileTableTitle.textContent = previousState.fileTableTitle;
+        
+        // 恢复图表
+        const actualItems = currentDisplayFolders;
+        const names = actualItems.map(f => {
+            let displayName = f.name;
+            if (displayName.length > 15) displayName = displayName.substring(0, 15) + '...';
+            return (f.type === 'file' ? '📄 ' : '📁 ') + displayName;
+        });
+        const sizes = actualItems.map(f => (f.size / (1024 * 1024 * 1024)));
+        
+        window.currentDisplayItems = actualItems;
+        if (window.barChart) {
+            window.barChart.data.labels = names.map(x => String(x));
+            window.barChart.data.datasets[0].data = sizes.map(x => Number(x) || 0);
+            window.barChart.update();
+            setTimeout(() => { if (window.renderBarLabels) window.renderBarLabels(); }, 0);
+        }
+        
+        // 恢复文件列表
+        updateFileTable();
+        
+        // Hide back button if stack is empty
+        const backBtn = document.getElementById('chartBackBtn');
+        if (backBtn) backBtn.classList.toggle('hidden', folderNavigationStack.length === 0);
     }
 }
 // 导出功能已移除
@@ -2716,13 +2621,13 @@ function updateDuplicateTable() {
                     <div class="w-6 h-6 rounded-lg flex items-center justify-center mr-2 transition-colors" style="${iconContainerStyle}">
                         <i class="fas ${getFileIcon(file.type)}" style="${iconStyle}"></i>
                     </div>
-                    <span class="text-xs font-medium text-gray-200 truncate max-w-[200px]" title="${file.name}">
+                    <span class="text-xs font-medium text-gray-200 truncate max-w-[400px]" title="${file.name}">
                         ${file.name || '未知文件'}
                     </span>
                 </div>
             </td>
             <td class="px-3 py-2">
-                <div class="text-xs text-gray-500 truncate max-w-[300px]" title="${file.path}">${file.path}</div>
+                <div class="text-xs text-gray-500 truncate max-w-[500px]" title="${file.path}">${file.path}</div>
             </td>
             <td class="px-3 py-2 font-mono text-xs text-gray-300">
                 ${formatBytes(file.size)}
@@ -2941,4 +2846,72 @@ async function bulkDeleteSelected() {
     updateBulkDeleteButton();
     refreshSelectAllState();
 }
+
+// Auth Logic
+async function checkAuthStatus() {
+    try {
+        const res = await fetch('/api/auth/status');
+        const data = await res.json();
+        if (data.success && data.hasPassword) {
+            const modal = document.getElementById('loginModal');
+            if (modal) modal.classList.remove('hidden');
+        }
+    } catch (e) {
+        console.error('Auth check failed:', e);
+    }
+}
+
+async function handleLogin(e) {
+    e.preventDefault();
+    const password = document.getElementById('loginPassword').value;
+    try {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password })
+        });
+        const data = await res.json();
+        if (data.success) {
+            document.getElementById('loginModal').classList.add('hidden');
+            document.getElementById('loginPassword').value = '';
+        } else {
+            alert(data.error || '登录失败');
+        }
+    } catch (e) {
+        alert('登录请求失败');
+    }
+}
+
+async function handlePasswordUpdate(e) {
+    e.preventDefault();
+    const oldPassword = document.getElementById('oldPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
     
+    if (newPassword !== confirmPassword) {
+        alert('两次输入的新密码不一致');
+        return;
+    }
+    
+    try {
+        const res = await fetch('/api/auth/password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ oldPassword, newPassword })
+        });
+        const data = await res.json();
+        if (data.success) {
+            alert('密码更新成功');
+            document.getElementById('oldPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+        } else {
+            alert(data.error || '密码更新失败');
+        }
+    } catch (e) {
+        alert('请求失败');
+    }
+}
+
+// Initialize Auth Check
+checkAuthStatus();

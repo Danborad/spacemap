@@ -8,6 +8,7 @@ const PORT = process.env.PORT || 7082;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const SAVED_FOLDERS_FILE = path.join(DATA_DIR, 'saved-folders.json');
 const SCAN_HISTORY_FILE = path.join(DATA_DIR, 'scan-history.json');
+const PASSWORD_FILE = path.join(DATA_DIR, 'password.json');
 
 // 中间件
 app.use(cors());
@@ -64,6 +65,47 @@ app.get('/api/env', (req, res) => {
       VERSION: version
     } 
   });
+});
+
+// Auth APIs
+app.get('/api/auth/status', async (req, res) => {
+    try {
+        await ensureDataFile(PASSWORD_FILE, { password: '' });
+        const data = await readJSON(PASSWORD_FILE, { password: '' });
+        res.json({ success: true, hasPassword: !!data.password });
+    } catch (e) {
+        res.status(500).json({ success: false, error: 'Failed to check auth status' });
+    }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { password } = req.body;
+        const data = await readJSON(PASSWORD_FILE, { password: '' });
+        if (!data.password || data.password === password) {
+            res.json({ success: true });
+        } else {
+            res.status(401).json({ success: false, error: '密码错误' });
+        }
+    } catch (e) {
+        res.status(500).json({ success: false, error: '登录失败' });
+    }
+});
+
+app.post('/api/auth/password', async (req, res) => {
+    try {
+        const { oldPassword, newPassword } = req.body;
+        const data = await readJSON(PASSWORD_FILE, { password: '' });
+        
+        if (data.password && data.password !== oldPassword) {
+            return res.status(401).json({ success: false, error: '旧密码错误' });
+        }
+        
+        await writeJSON(PASSWORD_FILE, { password: newPassword });
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: '密码更新失败' });
+    }
 });
 
 // 文件类型分类
@@ -422,8 +464,8 @@ app.post('/api/scan', async (req, res) => {
       const allHist = await readJSON(SCAN_HISTORY_FILE, {});
       const time = Date.now();
 
-      // Create lightweight history data (keep necessary summary data)
-      const { allFiles, allFolders, ...historyData } = data;
+      // Keep all data for history to enable client-side drill-down
+      const historyData = data;
 
       if (Array.isArray(paths)) {
         for (const p of paths) {
