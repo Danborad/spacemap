@@ -25,21 +25,45 @@ let themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 let authorizedPaths = [];
 const FEEDBACK_EMAIL = 'https://github.com/Danborad/spacemap';
 
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[ch]));
+}
+
+function escapeAttr(value) {
+    return escapeHtml(value);
+}
+
+function createHistorySummary(data) {
+    return {
+        totalFiles: data && data.totalFiles || 0,
+        totalFolders: data && data.totalFolders || 0,
+        totalSize: data && data.totalSize || 0,
+        averageFileSize: data && data.averageFileSize || 0,
+        fileTypes: data && data.fileTypes || {}
+    };
+}
+
 // 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     initTheme();
     initCharts();
     initEventListeners();
     // loadScanResults();
-    loadSavedFolders(); // 加载保存的文件夹路径
-    loadScanHistoryFromServer(); // 加载扫描历史
-    updateLastScanStatus();
+    await loadSavedFolders(); // 加载保存的文件夹路径
+    await loadScanHistoryFromServer(); // 加载扫描历史
     
     // 如果有保存的文件夹路径，更新按钮显示
     if (selectedFolders.length > 0) {
         updateFolderButton(selectedFolders[0].name);
     } else {
         updateFolderButton("选择文件夹");
+        updateLastScanStatus();
     }
 });
 
@@ -54,8 +78,9 @@ function initCharts() {
                 labels: ['视频', '图片', '文档', '其他'], 
                 datasets: [{ 
                     data: [0,0,0,0], 
-                    backgroundColor: ['#6366f1', '#f43f5e', '#f59e0b', '#cbd5e1'], 
-                    borderWidth: 0, 
+                    backgroundColor: ['#0a84ff', '#ff2d55', '#ff9f0a', '#d1d1d6'], 
+                    borderColor: '#ffffff',
+                    borderWidth: 2, 
                     hoverOffset: 4 
                 }] 
             },
@@ -72,8 +97,8 @@ function initCharts() {
                         labels: { 
                             usePointStyle: true, 
                             padding: 20,
-                            color: '#cbd5e1',
-                            font: { family: "'Inter', sans-serif", size: 12 }
+                            color: '#6e6e73',
+                            font: { family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", size: 12 }
                         } 
                     } 
                 } 
@@ -102,10 +127,10 @@ function initCharts() {
                 datasets: [{ 
                     label: '占用空间 (GB)', 
                     data: [], 
-                    backgroundColor: '#6366f1', 
-                    borderRadius: 50, 
-                    barPercentage: 0.7, 
-                    categoryPercentage: 0.8 
+                    backgroundColor: '#0a84ff', 
+                    borderRadius: 3, 
+                    barPercentage: 0.86, 
+                    categoryPercentage: 0.78 
                 }] 
             },
             options: {
@@ -114,18 +139,18 @@ function initCharts() {
                 responsive: true,
                 animation: false,
                 animations: { colors: false, numbers: false },
-                layout: { padding: { left: 160, right: 6, top: 6, bottom: 6 } },
+                layout: { padding: { left: 160, right: 8, top: 6, bottom: 6 } },
                 scales: {
                     x: {
                         beginAtZero: true,
-                        grid: { display: true, color: 'rgba(255, 255, 255, 0.1)', borderDash: [4, 4], drawBorder: false },
-                        ticks: { color: '#94a3b8', font: { size: 10 } }
+                        grid: { display: true, color: 'rgba(60, 60, 67, 0.12)', borderDash: [4, 4], drawBorder: false },
+                        ticks: { color: '#86868b', font: { size: 10 } }
                     },
                     y: {
                         grid: { display: false },
                         ticks: {
-                            color: '#cbd5e1',
-                            font: { size: 11, family: "'Inter', sans-serif" },
+                            color: '#1d1d1f',
+                            font: { size: 12, family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", weight: 700 },
                             autoSkip: false,
                             maxRotation: 0,
                             padding: 2,
@@ -137,10 +162,10 @@ function initCharts() {
                 plugins: {
                     legend: { display: false },
                     tooltip: {
-                        backgroundColor: 'rgba(15, 23, 42, 0.9)',
-                        titleColor: '#f1f5f9',
-                        bodyColor: '#cbd5e1',
-                        borderColor: 'rgba(255, 255, 255, 0.1)',
+                        backgroundColor: 'rgba(255, 255, 255, 0.96)',
+                        titleColor: '#1d1d1f',
+                        bodyColor: '#3a3a3c',
+                        borderColor: 'rgba(60, 60, 67, 0.18)',
                         borderWidth: 1,
                         padding: 12,
                         displayColors: false,
@@ -158,7 +183,7 @@ function initCharts() {
                         const index = elements[0].index;
                         if (window.currentDisplayItems && window.currentDisplayItems[index]) {
                             const item = window.currentDisplayItems[index];
-                            if (item.type === 'folder') drillDownFolder(item.name);
+                            if (item.type === 'folder') drillDownFolder(item.name, item.path);
                         }
                     }
                 }
@@ -185,7 +210,7 @@ function initCharts() {
             const labels = chart.data && chart.data.labels ? chart.data.labels : [];
             const items = window.currentDisplayItems || [];
             const isDark = document.documentElement.classList.contains('dark');
-            const color = isDark ? '#e5e7eb' : '#0f172a';
+            const color = isDark ? '#f5f5f7' : '#1d1d1f';
             container.innerHTML = '';
             
             const padLeft = (chart.options && chart.options.layout && chart.options.layout.padding && chart.options.layout.padding.left) || 160;
@@ -193,7 +218,7 @@ function initCharts() {
             
             // Optimization: Use Canvas measureText instead of DOM measurement
             const ctx = chart.ctx;
-            ctx.font = "11px 'Inter', sans-serif";
+            ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
             
             function truncateByWidth(text) {
                 const ellipsis = '...';
@@ -214,7 +239,7 @@ function initCharts() {
                 const item = items[i];
                 
                 let iconClass = 'fa-folder';
-                let iconColor = isDark ? '#6366f1' : '#4f46e5'; // Indigo for folder
+                let iconColor = isDark ? '#0a84ff' : '#0a84ff';
 
                 if (item && item.type === 'file') {
                     const ext = item.name.split('.').pop().toLowerCase();
@@ -230,12 +255,13 @@ function initCharts() {
                 const row = document.createElement('div');
                 row.style.position = 'absolute';
                 row.style.left = '0px';
-                row.style.top = `${yPos - 10}px`;
+                row.style.top = `${yPos - 9}px`;
                 row.style.zIndex = '21';
                 row.style.display = 'flex';
                 row.style.alignItems = 'center';
                 row.style.color = color;
-                row.style.fontSize = '11px';
+                row.style.fontSize = '12px';
+                row.style.fontWeight = '700';
                 row.style.whiteSpace = 'nowrap';
                 
                 const iconEl = document.createElement('i');
@@ -255,36 +281,36 @@ function initCharts() {
 
     const trendEl = document.getElementById('sizeTrendChart');
     if (trendEl) {
-        const sizeTrendChart = echarts.init(trendEl, 'dark', { renderer: 'canvas' });
+        const sizeTrendChart = echarts.init(trendEl, null, { renderer: 'canvas' });
         sizeTrendChart.setOption({
             backgroundColor: 'transparent',
-            tooltip: { trigger: 'axis', backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'rgba(255,255,255,0.1)', textStyle: { color: '#cbd5e1' } },
+            tooltip: { trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.96)', borderColor: 'rgba(60,60,67,0.18)', textStyle: { color: '#1d1d1f' } },
             grid: { top: '14%', left: '3%', right: '4%', bottom: '3%', containLabel: true },
             animation: false,
             xAxis: { 
                 type: 'category', 
                 boundaryGap: false, 
                 data: [],
-                axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } },
-                axisLabel: { color: '#94a3b8' }
+                axisLine: { lineStyle: { color: 'rgba(60, 60, 67, 0.14)' } },
+                axisLabel: { color: '#86868b' }
             },
             yAxis: [{ 
                 type: 'value', 
                 position: 'left', 
-                axisLabel: { formatter: '{value} GB', color: '#94a3b8' }, 
-                splitLine: { lineStyle: { type: 'dashed', color: 'rgba(255, 255, 255, 0.1)' } } 
+                axisLabel: { formatter: '{value} GB', color: '#86868b' }, 
+                splitLine: { lineStyle: { type: 'dashed', color: 'rgba(60, 60, 67, 0.14)' } } 
             }],
             series: [{ 
                 name: '总大小 (GB)', 
                 type: 'line', 
                 smooth: true, 
                 data: [], 
-                lineStyle: { color: '#6366f1', width: 3 }, 
+                lineStyle: { color: '#0a84ff', width: 3 }, 
                 symbol: 'none', 
                 areaStyle: { 
                     color: new echarts.graphic.LinearGradient(0,0,0,1,[
-                        {offset:0,color:'rgba(99, 102, 241, 0.3)'},
-                        {offset:1,color:'rgba(99, 102, 241, 0)'}
+                        {offset:0,color:'rgba(10, 132, 255, 0.22)'},
+                        {offset:1,color:'rgba(10, 132, 255, 0)'}
                     ]) 
                 } 
             }]
@@ -314,9 +340,10 @@ function initEventListeners() {
         if (e.target.closest('tbody button')) {
             e.stopPropagation();
             const button = e.target.closest('tbody button');
-            const action = button.title;
-            const fileName = button.closest('tr').querySelector('td:first-child span').textContent;
-            const filePath = button.closest('tr').dataset.filePath;
+            const row = button.closest('tr');
+            const action = button.dataset.action || button.title;
+            const fileName = button.dataset.fileName || (row && row.dataset.fileName) || '';
+            const filePath = button.dataset.filePath || (row && row.dataset.filePath) || '';
             
             handleFileAction(action, filePath, fileName);
         }
@@ -404,6 +431,48 @@ function initEventListeners() {
             headerEl.style.setProperty('--mx', mx);
             headerEl.style.setProperty('--my', my);
         });
+    }
+}
+
+function setActiveSidebarNav(name) {
+    document.querySelectorAll('.nav-item[data-nav]').forEach(item => {
+        item.classList.toggle('active', item.dataset.nav === name);
+    });
+}
+
+function scrollToSection(selector) {
+    const el = document.querySelector(selector);
+    if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+function handleSidebarNav(name) {
+    setActiveSidebarNav(name);
+    switch (name) {
+        case 'overview':
+            currentListMode = 'large';
+            scrollToSection('#overviewSection');
+            break;
+        case 'paths':
+            scrollToSection('#pathAnalysisSection');
+            break;
+        case 'duplicates':
+            toggleDuplicateMode('duplicates');
+            scrollToSection('#fileListSection');
+            break;
+        case 'history':
+            scrollToSection('#historySection');
+            break;
+        case 'security':
+            showFolderSettings();
+            setTimeout(() => {
+                const input = document.getElementById('oldPassword') || document.getElementById('newPassword');
+                if (input) input.focus();
+            }, 120);
+            break;
+        default:
+            scrollToSection('#overviewSection');
     }
 }
 
@@ -557,25 +626,25 @@ function updateFolderDropdown() {
     
     const folderListHtml = savedFolderPaths && savedFolderPaths.length > 0 ? 
         savedFolderPaths.map((folder, index) => `
-            <div class="px-4 py-2 hover:bg-white/5 cursor-pointer flex items-center justify-between rounded-lg transition-colors" onclick="switchToFolderPath(${index})">
+            <div class="px-3 py-2 hover:bg-blue-500/10 cursor-pointer flex items-center justify-between rounded-md transition-colors" onclick="switchToFolderPath(${index})">
                 <div class="flex items-center">
                     <i class="fas fa-folder text-accent-primary mr-3"></i>
                     <div>
-                        <div class="text-sm font-medium text-gray-200">${folder.name}</div>
-                        <div class="text-xs text-gray-400">${folder.path}</div>
+                        <div class="text-sm font-semibold text-text-primary">${escapeHtml(folder.name)}</div>
+                        <div class="text-xs text-text-secondary">${escapeHtml(folder.path)}</div>
                     </div>
                 </div>
-                ${index === currentFolderIndex ? '<i class="fas fa-check text-green-400"></i>' : ''}
+                ${index === currentFolderIndex ? '<i class="fas fa-check text-green-500"></i>' : ''}
             </div>
         `).join('') : 
-        '<div class="px-4 py-2 text-gray-500 text-sm">暂无配置的路径</div>';
+        '<div class="px-3 py-2 text-text-secondary text-sm">暂无配置的路径</div>';
     
     dropdownContent.innerHTML = `
-        <div class="max-h-60 overflow-y-auto custom-scrollbar">
+        <div class="max-h-60 overflow-y-auto">
             ${folderListHtml}
         </div>
-        <div class="border-t border-white/10 p-2 mt-1">
-            <button onclick="showFolderSettings(); toggleFolderDropdown();" class="w-full text-left px-3 py-2 text-sm text-accent-primary hover:bg-white/5 rounded-lg transition-colors flex items-center">
+        <div class="border-t border-[var(--line)] p-2 mt-1">
+            <button onclick="showFolderSettings(); toggleFolderDropdown();" class="w-full text-left px-3 py-2 text-sm text-accent-primary hover:bg-blue-500/10 rounded-md transition-colors flex items-center">
                 <i class="fas fa-cog mr-2"></i>管理扫描路径
             </button>
         </div>
@@ -598,61 +667,13 @@ function handleFileAction(action, filePath, fileName) {
 }
 
 // 显示文件详情
-async function showFileDetails(filePath) {
+async function showFileDetailsFromApi(filePath) {
     try {
-        const response = await fetch(`/api/file-details?filePath=${encodeURIComponent(filePath)}`);
+        const response = await fetch(`/api/file-details?path=${encodeURIComponent(filePath)}`);
         const result = await response.json();
         
         if (result.success) {
-            const file = result.data;
-            const modal = document.getElementById('fileDetailModal');
-            const content = document.getElementById('fileDetailContent');
-            
-            content.innerHTML = `
-                <div class="space-y-6">
-                    <div class="flex items-center space-x-4 p-4 bg-white/5 rounded-2xl">
-                        <div class="w-12 h-12 rounded-xl bg-accent-primary/20 flex items-center justify-center">
-                            <i class="fas fa-file text-2xl text-accent-primary"></i>
-                        </div>
-                        <div>
-                            <h4 class="font-bold text-lg text-white">${file.name}</h4>
-                            <p class="text-gray-400 text-sm break-all">${file.path}</p>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-6">
-                        <div class="glass-panel p-4 bg-white/5 border-none">
-                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-1">文件大小</label>
-                            <p class="text-gray-200 font-semibold">${file.sizeFormatted}</p>
-                        </div>
-                        <div class="glass-panel p-4 bg-white/5 border-none">
-                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-1">文件类型</label>
-                            <p class="text-gray-200 font-semibold">${file.type}</p>
-                        </div>
-                        <div class="glass-panel p-4 bg-white/5 border-none">
-                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-1">扩展名</label>
-                            <p class="text-gray-200 font-semibold">${file.extension || '无'}</p>
-                        </div>
-                        <div class="glass-panel p-4 bg-white/5 border-none">
-                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-1">MIME类型</label>
-                            <p class="text-gray-200 font-semibold">${file.mimeType}</p>
-                        </div>
-                        <div class="glass-panel p-4 bg-white/5 border-none">
-                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-1">创建时间</label>
-                            <p class="text-gray-200 font-semibold">${new Date(file.created).toLocaleString('zh-CN')}</p>
-                        </div>
-                        <div class="glass-panel p-4 bg-white/5 border-none">
-                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-1">修改时间</label>
-                            <p class="text-gray-200 font-semibold">${new Date(file.modified).toLocaleString('zh-CN')}</p>
-                        </div>
-                    </div>
-                    <div class="flex justify-end pt-4">
-                        <button onclick="locateFile('${file.path.replace(/\\/g, '\\\\')}')" class="glass-btn text-accent-cyan hover:bg-accent-cyan/10 border-accent-cyan/20">
-                            <i class="fas fa-folder-open"></i> 在资源管理器中打开
-                        </button>
-                    </div>
-                </div>`;
-            
-            modal.classList.remove('hidden');
+            showFileDetailModal(result.data);
         } else {
             showNotification('获取文件详情失败: ' + result.error, 'error');
         }
@@ -682,26 +703,43 @@ async function deleteFile(filePath, fileName) {
     }
     
     try {
-        const response = await fetch('/api/file', {
-            method: 'DELETE',
+        const response = await fetch('/api/delete-files', {
+            method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ filePath })
+            body: JSON.stringify({ paths: [filePath] })
         });
         
         const result = await response.json();
         
         if (result.success) {
-            alert('文件删除成功');
-            // 重新加载数据
-            loadScanResults();
+            const deleted = Array.isArray(result.data && result.data.deleted) ? result.data.deleted : [];
+            const failed = Array.isArray(result.data && result.data.failed) ? result.data.failed : [];
+            if (deleted.length) {
+                const deletedSet = new Set(deleted);
+                selectedFilePaths.delete(filePath);
+                if (currentScanData && Array.isArray(currentScanData.allFiles)) {
+                    currentScanData.allFiles = currentScanData.allFiles.filter(f => !deletedSet.has(f.path));
+                    currentScanData.largeFiles = currentScanData.allFiles.slice().sort((a, b) => b.size - a.size).slice(0, 100);
+                    currentScanData.totalFiles = currentScanData.allFiles.length;
+                    currentScanData.totalSize = currentScanData.allFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+                    const ft = {};
+                    currentScanData.allFiles.forEach(f => { ft[f.type] = (ft[f.type] || 0) + 1; });
+                    currentScanData.fileTypes = ft;
+                }
+                renderCurrentList();
+                updateFileTypeChart();
+                showNotification('文件删除成功', 'success');
+            } else {
+                showNotification('删除文件失败: ' + ((failed[0] && failed[0].error) || '未知错误'), 'error');
+            }
         } else {
-            alert('删除文件失败: ' + result.error);
+            showNotification('删除文件失败: ' + result.error, 'error');
         }
     } catch (error) {
         console.error('删除文件错误:', error);
-        alert('删除文件时发生错误');
+        showNotification('删除文件时发生错误', 'error');
     }
 }
 
@@ -759,8 +797,8 @@ function loadFolderSettingsList() {
                         <div class="flex items-center space-x-3">
                             <i class="fas fa-folder text-primary"></i>
                             <div>
-                                <div class="text-sm font-medium">${folder.name}</div>
-                                <div class="text-xs text-text-secondary">${folder.path}</div>
+                                <div class="text-sm font-medium">${escapeHtml(folder.name)}</div>
+                                <div class="text-xs text-text-secondary">${escapeHtml(folder.path)}</div>
                             </div>
                         </div>
                         <div class="flex items-center space-x-2">
@@ -920,8 +958,41 @@ function updateFolderButton(folderName) {
     span.textContent = folderName || '切换文件夹';
 }
 
+async function loadLastScanForFolder(folder, notify = true) {
+    if (!folder || !folder.path) return;
+    try {
+        const response = await fetch(`/api/last-scan?path=${encodeURIComponent(folder.path)}`);
+        const result = await response.json();
+        const last = result && result.success ? result.data : null;
+        if (last && last.data) {
+            currentScanData = last.data;
+            if (!Array.isArray(currentScanData.largeFiles) && Array.isArray(currentScanData.allFiles)) {
+                currentScanData.largeFiles = currentScanData.allFiles.slice(0, 100);
+            }
+            if (!Array.isArray(currentScanData.folderSizes) && Array.isArray(currentScanData.allFolders)) {
+                currentScanData.folderSizes = currentScanData.allFolders.slice(0, 50);
+            }
+            updateAllDisplays();
+            const statusEl = document.getElementById('lastUpdatedText');
+            if (statusEl && last.timestamp) {
+                lastStatusMessage = `上次扫描：${new Date(last.timestamp).toLocaleString()}`;
+                statusEl.textContent = lastStatusMessage;
+            }
+            if (notify) showNotification(`已加载上次的扫描记录 (${new Date(last.timestamp).toLocaleString()})`, 'info');
+        } else {
+            currentScanData = null;
+            clearAllDisplays();
+            if (notify) showNotification('暂无该路径的扫描记录，点击"重新扫描"开始首次扫描', 'info');
+        }
+    } catch (_) {
+        currentScanData = null;
+        clearAllDisplays();
+        if (notify) showNotification('读取历史失败，请重新扫描', 'error');
+    }
+}
+
 // 切换到已配置的扫描路径
-function switchToFolderPath(index) {
+async function switchToFolderPath(index) {
     const selectedFolder = savedFolderPaths[index];
     if (selectedFolder) {
         selectedFolders = [selectedFolder];
@@ -936,25 +1007,7 @@ function switchToFolderPath(index) {
         enableButtons();
         
         showNotification(`已切换到: ${selectedFolder.name}`, 'success');
-        // 服务器读取该路径历史
-        fetch(`/api/last-scan?path=${encodeURIComponent(selectedFolder.path)}`)
-            .then(r => r.json())
-            .then(r => {
-                const last = r && r.success ? r.data : null;
-                if (last && last.data) {
-                    currentScanData = last.data;
-                    updateAllDisplays();
-                    showNotification(`已加载上次的扫描记录 (${new Date(last.timestamp).toLocaleString()})`, 'info');
-                } else {
-                    currentScanData = null;
-                    clearAllDisplays();
-                    showNotification('暂无该路径的扫描记录，点击"重新扫描"开始首次扫描', 'info');
-                }
-            }).catch(() => {
-                currentScanData = null;
-                clearAllDisplays();
-                showNotification('读取历史失败，请重新扫描', 'error');
-            });
+        await loadLastScanForFolder(selectedFolder, true);
     }
 }
 
@@ -1085,8 +1138,8 @@ async function loadAvailableFolders() {
                         <div class="flex items-center space-x-2">
                             <i class="fas fa-folder text-primary"></i>
                             <div>
-                                <div class="text-sm font-medium">${folder.name}</div>
-                                <div class="text-xs text-text-secondary">${folder.path}</div>
+                                <div class="text-sm font-medium">${escapeHtml(folder.name)}</div>
+                                <div class="text-xs text-text-secondary">${escapeHtml(folder.path)}</div>
                             </div>
                         </div>
                         <button onclick="removeSelectedFolder(${index})" class="text-red-500 hover:text-red-700">
@@ -1108,11 +1161,11 @@ async function loadAvailableFolders() {
                     <div class="flex items-center space-x-2">
                         <i class="fas fa-folder text-primary"></i>
                         <div>
-                            <div class="text-sm font-medium">${f.name}</div>
-                            <div class="text-xs text-text-secondary">${f.path}</div>
+                            <div class="text-sm font-medium">${escapeHtml(f.name)}</div>
+                            <div class="text-xs text-text-secondary">${escapeHtml(f.path)}</div>
                         </div>
                     </div>
-                    <button onclick="addAuthorizedFolder('${encodeURIComponent(f.path)}')" class="text-blue-500 hover:text-blue-700">
+                    <button onclick="addAuthorizedFolder('${encodeURIComponent(f.path).replace(/'/g, '%27')}')" class="text-blue-500 hover:text-blue-700">
                         <i class="fas fa-plus"></i>
                     </button>
                 </div>
@@ -1156,6 +1209,24 @@ async function loadSavedFolders() {
         
         await loadSavedFolderPaths();
         await loadAllowedPaths();
+        const savedSelectedRaw = localStorage.getItem('spacemap-selected-folders');
+        let preferredPath = '';
+        try {
+            const savedSelected = savedSelectedRaw ? JSON.parse(savedSelectedRaw) : [];
+            preferredPath = Array.isArray(savedSelected) && savedSelected[0] ? savedSelected[0].path : '';
+        } catch (_) {}
+        const initialIndex = preferredPath
+            ? savedFolderPaths.findIndex(folder => folder.path === preferredPath)
+            : (savedFolderPaths.length ? 0 : -1);
+        if (initialIndex >= 0) {
+            const initialFolder = savedFolderPaths[initialIndex];
+            selectedFolders = [initialFolder];
+            currentFolderIndex = initialIndex;
+            saveFoldersToLocalStorage();
+            updateFolderButton(initialFolder.name);
+            enableButtons();
+            await loadLastScanForFolder(initialFolder, false);
+        }
     } catch (error) {
         selectedFolders = [];
         savedFolderPaths = [];
@@ -1488,12 +1559,14 @@ function saveScanToHistory() {
     if (!currentScanData || !selectedFolders.length) return;
     
     const historyKey = selectedFolders[0].path;
-    // Create a lightweight version of scan data for history
-    // Remove large arrays to prevent localStorage quota exceeded and performance issues
-    const { allFiles, allFolders, largeFiles, ...summaryData } = currentScanData;
+    const timestamp = Date.now();
     const scanRecord = {
-        timestamp: Date.now(),
-        data: summaryData
+        timestamp,
+        data: currentScanData
+    };
+    const timelineRecord = {
+        timestamp,
+        data: createHistorySummary(currentScanData)
     };
     
     // 初始化该路径的历史记录（如果不存在）
@@ -1502,7 +1575,7 @@ function saveScanToHistory() {
     }
     
     // 添加新的扫描记录
-    scanHistory[historyKey].push(scanRecord);
+    scanHistory[historyKey].push(timelineRecord);
     
     // 限制历史记录数量（保留最近50次扫描）
     if (scanHistory[historyKey].length > 50) {
@@ -1511,7 +1584,7 @@ function saveScanToHistory() {
     
     // 保存到本地存储
     saveScanHistoryToLocal();
-    
+
     console.log(`保存扫描历史: ${historyKey}`, scanRecord);
 }
 
@@ -1524,7 +1597,21 @@ function updateAllDisplays() {
     document.getElementById('totalFolders').textContent = currentScanData.totalFolders.toLocaleString();
     document.getElementById('totalSize').textContent = formatBytes(currentScanData.totalSize);
     // 中心文本已移除
-    (function(){ try { const list = Array.isArray(currentScanData.allFiles) ? currentScanData.allFiles : []; let m=0; for (let i=0;i<list.length;i++){ const s=list[i].size||0; if (s>m) m=s; } document.getElementById('averageSize').textContent = formatBytes(m); } catch(_) { document.getElementById('averageSize').textContent = '0 B'; } })();
+    (function(){
+        try {
+            const list = Array.isArray(currentScanData.allFiles)
+                ? currentScanData.allFiles
+                : (Array.isArray(currentScanData.largeFiles) ? currentScanData.largeFiles : []);
+            let m = 0;
+            for (let i = 0; i < list.length; i++) {
+                const s = list[i].size || 0;
+                if (s > m) m = s;
+            }
+            document.getElementById('averageSize').textContent = formatBytes(m);
+        } catch(_) {
+            document.getElementById('averageSize').textContent = '0 B';
+        }
+    })();
     
     // 更新图表
     updateFileTypeChart();
@@ -1578,16 +1665,18 @@ function saveScanHistoryToLocal() {
 }
 
 // 从服务器加载扫描历史
-function loadScanHistoryFromServer() {
-    fetch('/api/scan-history')
-        .then(r => r.json())
-        .then(r => {
-            if (r.success && r.data) {
-                scanHistory = r.data;
-                renderTimeline();
-            }
-        })
-        .catch(e => console.error('加载历史失败', e));
+async function loadScanHistoryFromServer() {
+    try {
+        const r = await fetch('/api/scan-history?summary=1').then(x => x.json());
+        if (r.success && r.data) {
+            scanHistory = r.data;
+            renderTimeline();
+            return scanHistory;
+        }
+    } catch (e) {
+        console.error('加载历史失败', e);
+    }
+    return scanHistory;
 }
 function updateTrendChart(period = 'week') {
     if (!window.sizeTrendChart) return;
@@ -1597,7 +1686,7 @@ function updateTrendChart(period = 'week') {
     }
     
     const historyKey = selectedFolders[0].path;
-    fetch(`/api/scan-history?path=${encodeURIComponent(historyKey)}`)
+    fetch(`/api/scan-history?path=${encodeURIComponent(historyKey)}&summary=1`)
       .then(r => r.json())
       .then(r => {
         const historyData = (r && r.success && Array.isArray(r.data)) ? r.data : [];
@@ -1612,14 +1701,14 @@ function updateTrendChart(period = 'week') {
                   style: {
                       text: '暂无扫描历史\n点击"重新扫描"开始记录',
                       textAlign: 'center',
-                      fill: '#94a3b8',
+              fill: document.documentElement.classList.contains('dark') ? '#a1a1a6' : '#6e6e73',
                       fontSize: 14
                   }
               }]
           });
-          const scp0 = document.getElementById('sizeChangePill'); if (scp0) { scp0.textContent = '+0%'; scp0.className = 'text-xs font-bold px-2 py-1 rounded-lg bg-white/10 text-gray-400'; }
-          const fcp0 = document.getElementById('fileCountChangePill'); if (fcp0) { fcp0.textContent = '0%'; fcp0.className = 'text-xs font-bold px-2 py-1 rounded-lg bg-white/10 text-gray-400'; }
-          const fldp0 = document.getElementById('folderCountChangePill'); if (fldp0) { fldp0.textContent = '0%'; fldp0.className = 'text-xs font-bold px-2 py-1 rounded-lg bg-white/10 text-gray-400'; }
+          const scp0 = document.getElementById('sizeChangePill'); if (scp0) { scp0.textContent = '+0%'; scp0.className = 'pill'; scp0.style.color = ''; scp0.style.background = ''; }
+          const fcp0 = document.getElementById('fileCountChangePill'); if (fcp0) { fcp0.textContent = '0%'; fcp0.className = 'pill'; fcp0.style.color = ''; fcp0.style.background = ''; }
+          const fldp0 = document.getElementById('folderCountChangePill'); if (fldp0) { fldp0.textContent = '0%'; fldp0.className = 'pill'; fldp0.style.color = ''; fldp0.style.background = ''; }
           return;
         }
 
@@ -1630,22 +1719,22 @@ function updateTrendChart(period = 'week') {
             backgroundColor: 'transparent',
             tooltip: { 
                 trigger: 'axis', 
-                backgroundColor: 'rgba(15, 23, 42, 0.9)', 
-                borderColor: 'rgba(255,255,255,0.1)', 
-                textStyle: { color: '#cbd5e1' } 
+                backgroundColor: document.documentElement.classList.contains('dark') ? 'rgba(31,35,43,0.96)' : 'rgba(255,255,255,0.96)', 
+                borderColor: document.documentElement.classList.contains('dark') ? 'rgba(235,235,245,0.16)' : 'rgba(60,60,67,0.18)', 
+                textStyle: { color: document.documentElement.classList.contains('dark') ? '#f5f5f7' : '#1d1d1f' } 
             },
             grid: { top: '15%', left: '3%', right: '4%', bottom: '3%', containLabel: true },
             xAxis: { 
                 data: dates, 
-                axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } },
-                axisLabel: { color: '#94a3b8', rotate: 0, fontSize: 10 }
+                axisLine: { lineStyle: { color: document.documentElement.classList.contains('dark') ? 'rgba(235,235,245,0.16)' : 'rgba(60,60,67,0.14)' } },
+                axisLabel: { color: document.documentElement.classList.contains('dark') ? '#a1a1a6' : '#86868b', rotate: 0, fontSize: 10 }
             },
             yAxis: { 
                 type: 'value', 
                 name: '总大小 (GB)', 
-                nameTextStyle: { color: '#94a3b8' },
-                axisLabel: { formatter: '{value} GB', color: '#94a3b8' },
-                splitLine: { lineStyle: { type: 'dashed', color: 'rgba(255, 255, 255, 0.1)' } }
+                nameTextStyle: { color: document.documentElement.classList.contains('dark') ? '#a1a1a6' : '#86868b' },
+                axisLabel: { formatter: '{value} GB', color: document.documentElement.classList.contains('dark') ? '#a1a1a6' : '#86868b' },
+                splitLine: { lineStyle: { type: 'dashed', color: document.documentElement.classList.contains('dark') ? 'rgba(235,235,245,0.16)' : 'rgba(60,60,67,0.14)' } }
             },
             series: [{ 
                 name: '总大小 (GB)', 
@@ -1655,11 +1744,11 @@ function updateTrendChart(period = 'week') {
                 symbol: 'circle',
                 symbolSize: 8,
                 data: totalSizes, 
-                lineStyle: { color: '#6366f1', width: 3 }, 
+                lineStyle: { color: '#0a84ff', width: 3 }, 
                 areaStyle: { 
                     color: new echarts.graphic.LinearGradient(0,0,0,1,[
-                        {offset:0,color:'rgba(99, 102, 241, 0.3)'},
-                        {offset:1,color:'rgba(99, 102, 241, 0)'}
+                        {offset:0,color:'rgba(10, 132, 255, 0.22)'},
+                        {offset:1,color:'rgba(10, 132, 255, 0)'}
                     ]) 
                 } 
             }],
@@ -1680,9 +1769,17 @@ function updateTrendChart(period = 'week') {
             if (!el) return;
             const sign = val > 0 ? '+' : '';
             el.textContent = `${sign}${val.toFixed(1)}%`;
-            if (val > 0) el.className = 'text-xs font-bold px-2 py-1 rounded-lg bg-red-500/20 text-red-400';
-            else if (val < 0) el.className = 'text-xs font-bold px-2 py-1 rounded-lg bg-green-500/20 text-green-400';
-            else el.className = 'text-xs font-bold px-2 py-1 rounded-lg bg-white/10 text-gray-300';
+            el.className = 'pill';
+            if (val > 0) {
+                el.style.color = '#ff453a';
+                el.style.background = 'rgba(255, 69, 58, .12)';
+            } else if (val < 0) {
+                el.style.color = '#30a46c';
+                el.style.background = 'rgba(48, 164, 108, .12)';
+            } else {
+                el.style.color = '';
+                el.style.background = '';
+            }
         };
 
         formatPill('sizeChangePill', scVal);
@@ -1746,14 +1843,10 @@ function renderFolderLabels(names) {
 
 function updateChartsTheme(isDark) {
     try {
-        // Dark Mode: Slate 900/800 base, Light Mode: White base
-        const gridColor = isDark ? '#1e293b' : '#e2e8f0'; // Slate 800 vs Slate 200
-        const axisLabelColor = isDark ? '#94a3b8' : '#64748b'; // Slate 400 vs Slate 500
-        const textColor = isDark ? '#cbd5e1' : '#475569'; // Slate 300 vs Slate 600
-        
-        // Reference Palette from User Image
-        // Video: Indigo (#6366f1), Image: Pink/Rose (#f43f5e), Document: Amber (#f59e0b), Other: Slate (#cbd5e1)
-        const chartColors = ['#6366f1', '#f43f5e', '#f59e0b', '#cbd5e1']; 
+        const gridColor = isDark ? 'rgba(235,235,245,0.16)' : 'rgba(60,60,67,0.14)';
+        const axisLabelColor = isDark ? '#a1a1a6' : '#86868b';
+        const textColor = isDark ? '#f5f5f7' : '#1d1d1f';
+        const chartColors = ['#0a84ff', '#ff2d55', '#ff9f0a', '#d1d1d6']; 
 
         if (window.pieChart) {
             if (window.pieChart.options.plugins && window.pieChart.options.plugins.legend) {
@@ -1761,15 +1854,15 @@ function updateChartsTheme(isDark) {
             }
             if (window.pieChart.data.datasets[0]) {
                 window.pieChart.data.datasets[0].backgroundColor = chartColors;
-                window.pieChart.data.datasets[0].borderColor = isDark ? '#0f1523' : '#ffffff';
-                window.pieChart.data.datasets[0].borderWidth = isDark ? 0 : 2;
+                window.pieChart.data.datasets[0].borderColor = isDark ? '#1f232b' : '#ffffff';
+                window.pieChart.data.datasets[0].borderWidth = 2;
             }
             window.pieChart.update();
         }
 
         if (window.barChart) {
             // Solid color for bars as per reference
-            const barColor = '#6366f1';
+            const barColor = '#0a84ff';
 
             if (window.barChart.data.datasets[0]) {
                 window.barChart.data.datasets[0].backgroundColor = barColor;
@@ -1791,9 +1884,9 @@ function updateChartsTheme(isDark) {
         }
 
         if (window.sizeTrendChart) {
-            const lineColor = '#6366f1';
-            const areaStart = 'rgba(99, 102, 241, 0.3)';
-            const areaEnd = 'rgba(99, 102, 241, 0)';
+            const lineColor = '#0a84ff';
+            const areaStart = 'rgba(10, 132, 255, 0.22)';
+            const areaEnd = 'rgba(10, 132, 255, 0)';
             
             const area = { 
                 type: 'linear', x: 0, y: 0, x2: 0, y2: 1, 
@@ -1816,8 +1909,8 @@ function updateChartsTheme(isDark) {
                     areaStyle: { color: area } 
                 }],
                 tooltip: {
-                    backgroundColor: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)',
-                    borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
+                    backgroundColor: isDark ? 'rgba(31,35,43,0.96)' : 'rgba(255, 255, 255, 0.96)',
+                    borderColor: isDark ? 'rgba(235,235,245,0.16)' : 'rgba(60,60,67,0.18)',
                     textStyle: { color: textColor },
                     extraCssText: isDark ? '' : 'box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);'
                 }
@@ -1903,23 +1996,28 @@ function updateFileTable() {
             iconStyle = 'color: #ffffff !important';
         }
 
+        const safeName = escapeHtml(file.name || '未知文件');
+        const safeNameAttr = escapeAttr(file.name || '未知文件');
+        const safePath = escapeHtml(file.path || '');
+        const safePathAttr = escapeAttr(file.path || '');
+
         return `
-        <tr class="border-t border-white/5 hover:bg-white/5 transition-colors group" data-file-path="${file.path}">
+        <tr class="border-t border-white/5 hover:bg-white/5 transition-colors group" data-file-path="${safePathAttr}" data-file-name="${safeNameAttr}">
             <td class="px-3 py-2 w-12 text-center">
-                <input type="checkbox" class="file-select rounded border-gray-600 bg-gray-800 text-accent-primary focus:ring-offset-0 focus:ring-1 focus:ring-accent-primary" data-file-path="${file.path}" onchange="toggleFileSelection(this)" ${isSelected ? 'checked' : ''}>
+                <input type="checkbox" class="file-select rounded border-gray-600 bg-gray-800 text-accent-primary focus:ring-offset-0 focus:ring-1 focus:ring-accent-primary" data-file-path="${safePathAttr}" onchange="toggleFileSelection(this)" ${isSelected ? 'checked' : ''}>
             </td>
             <td class="px-3 py-2">
                 <div class="flex items-center">
                     <div class="w-6 h-6 rounded-lg flex items-center justify-center mr-2 transition-colors" style="${iconContainerStyle}">
                         <i class="fas ${getFileIcon(file.type)}" style="${iconStyle}"></i>
                     </div>
-                    <span class="text-xs font-medium text-gray-200 truncate max-w-[400px]" title="${file.name}">
-                        ${file.name || '未知文件'}
+                    <span class="text-xs font-medium text-gray-200 truncate max-w-[400px]" title="${safeNameAttr}">
+                        ${safeName}
                     </span>
                 </div>
             </td>
             <td class="px-3 py-2">
-                <div class="text-xs text-gray-500 truncate max-w-[500px]" title="${file.path}">${file.path}</div>
+                <div class="text-xs text-gray-500 truncate max-w-[500px]" title="${safePathAttr}">${safePath}</div>
             </td>
             <td class="px-3 py-2 font-mono text-xs text-gray-300">
                 ${formatBytes(file.size)}
@@ -1930,7 +2028,7 @@ function updateFileTable() {
                 </span>
             </td>
             <td class="px-3 py-2 text-right">
-                <button class="text-gray-500 hover:text-red-400 transition-colors p-2 rounded-lg hover:bg-white/5" title="删除" onclick="deleteFile('${file.path}','${file.name}')">
+                <button class="text-gray-500 hover:text-red-400 transition-colors p-2 rounded-lg hover:bg-white/5" title="删除" data-action="删除" data-file-path="${safePathAttr}" data-file-name="${safeNameAttr}">
                     <i class="fas fa-trash-alt"></i>
                 </button>
             </td>
@@ -2067,11 +2165,11 @@ function showFileDetailModal(file) {
         <div class="space-y-3">
             <div class="flex items-center space-x-3">
                 <i class="fas ${getFileIcon(file.type)} ${getFileTypeColor(file.type)}"></i>
-                <div class="text-lg font-semibold">${file.name || '未知文件'}</div>
+                <div class="text-lg font-semibold">${escapeHtml(file.name || '未知文件')}</div>
             </div>
-            <div class="text-sm text-text-secondary">${file.path || ''}</div>
+            <div class="text-sm text-text-secondary">${escapeHtml(file.path || '')}</div>
             <div class="text-sm">大小：${formatBytes(file.size || 0)}</div>
-            <div class="text-sm">类型：${typeName}</div>
+            <div class="text-sm">类型：${escapeHtml(typeName)}</div>
         </div>
     `;
     modal.classList.remove('hidden');
@@ -2315,21 +2413,18 @@ async function filterFilesByFolder(folderName) {
 
 // 显示文件详情
 function showFileDetails(fileRef) {
-    const currentFolderFiles = (currentScanData.allFiles || []).filter(file => {
-        const fp = String(file.path || '').replace(/\\/g, '/');
-        const cp = String(currentFolderPath || '').replace(/\\/g, '/');
-        return fp.startsWith(cp + '/') || fp === cp;
-    });
+    if (!currentScanData || !Array.isArray(currentScanData.allFiles)) return;
+    const allFiles = currentScanData.allFiles;
     let file = null;
     if (fileRef) {
         const ref = String(fileRef);
         const isPath = ref.includes('/') || ref.includes('\\');
         if (isPath) {
             const norm = ref.replace(/\\/g, '/');
-            file = currentFolderFiles.find(f => (f.path || '').replace(/\\/g, '/') === norm);
+            file = allFiles.find(f => (f.path || '').replace(/\\/g, '/') === norm);
         }
         if (!file) {
-            file = currentFolderFiles.find(f => f.name === ref);
+            file = allFiles.find(f => f.name === ref);
         }
     }
     if (file) {
@@ -2339,8 +2434,79 @@ function showFileDetails(fileRef) {
     }
 }
 
+function getChartPanel() {
+    return document.querySelector('#barChart')?.closest('.panel')
+        || document.querySelector('#barChart')?.closest('.glass-panel')
+        || document.querySelector('#barChart')?.closest('.card');
+}
+
+function setChartTitle(text) {
+    const titleEl = getChartPanel()?.querySelector('.panel-title, h2, h3');
+    if (titleEl) titleEl.textContent = text;
+}
+
+function getChartTitle() {
+    return getChartPanel()?.querySelector('.panel-title, h2, h3')?.textContent || '文件夹大小排名';
+}
+
+function getDirectChildrenFromLocal(folderPath) {
+    if (!currentScanData) return null;
+    const hasFullFolders = Array.isArray(currentScanData.allFolders);
+    const hasFullFiles = Array.isArray(currentScanData.allFiles);
+    if (!hasFullFolders && !hasFullFiles) return null;
+
+    const cp = String(folderPath || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    const isDirectChild = (itemPath) => {
+        const fp = String(itemPath || '').replace(/\\/g, '/');
+        if (!fp.startsWith(cp + '/')) return false;
+        const rel = fp.slice(cp.length + 1);
+        return !!rel && !rel.includes('/');
+    };
+
+    const subFolders = (currentScanData.allFolders || [])
+        .filter(f => isDirectChild(f.path))
+        .sort((a, b) => (b.size || 0) - (a.size || 0));
+    const directFiles = (currentScanData.allFiles || [])
+        .filter(f => isDirectChild(f.path))
+        .sort((a, b) => (b.size || 0) - (a.size || 0));
+    const folderFiles = (currentScanData.allFiles || [])
+        .filter(f => {
+            const fp = String(f.path || '').replace(/\\/g, '/');
+            return fp === cp || fp.startsWith(cp + '/');
+        })
+        .sort((a, b) => (b.size || 0) - (a.size || 0));
+
+    return { subFolders, directFiles, folderFiles, totalFiles: folderFiles.length };
+}
+
+async function loadFolderChildren(folderPath) {
+    const local = getDirectChildrenFromLocal(folderPath);
+    if (local) return local;
+
+    const scanPath = selectedFolders && selectedFolders[0] ? selectedFolders[0].path : '';
+    const response = await fetch(`/api/folder-children?path=${encodeURIComponent(folderPath)}&scanPath=${encodeURIComponent(scanPath)}&limit=500`);
+    const result = await response.json();
+    if (!result || !result.success) {
+        throw new Error((result && result.error) || '读取文件夹子项失败');
+    }
+    return result.data || { subFolders: [], directFiles: [], folderFiles: [], totalFiles: 0 };
+}
+
+function updateFileListForFolder(folderName, children) {
+    const folderFiles = Array.isArray(children && children.folderFiles) ? children.folderFiles : [];
+    filteredFiles = folderFiles;
+    currentListMode = 'large';
+    currentPage = 1;
+    renderCurrentList();
+    const titleEl = document.getElementById('fileListTitle');
+    if (titleEl) {
+        const total = Number(children && children.totalFiles) || folderFiles.length;
+        titleEl.textContent = `文件夹 "${folderName}" 内的文件 (${total.toLocaleString()} 个)`;
+    }
+}
+
 // 文件夹钻取功能
-function drillDownFolder(folderName) {
+async function drillDownFolder(folderName, folderPath) {
     console.log('drillDownFolder 被调用，查找文件夹:', folderName);
     
     // 查找文件夹：从多个数据源中查找
@@ -2348,17 +2514,17 @@ function drillDownFolder(folderName) {
     
     // 1. 优先从当前显示的文件夹中查找
     if (currentDisplayFolders && currentDisplayFolders.length > 0) {
-        folder = currentDisplayFolders.find(f => f.name === folderName);
+        folder = currentDisplayFolders.find(f => (folderPath && f.path === folderPath) || f.name === folderName);
     }
     
     // 2. 如果没找到，从原始数据中查找
     if (!folder && currentScanData && currentScanData.folderSizes) {
-        folder = currentScanData.folderSizes.find(f => f.name === folderName);
+        folder = currentScanData.folderSizes.find(f => (folderPath && f.path === folderPath) || f.name === folderName);
     }
     
     // 3. 如果还是没找到，从所有文件夹数据中查找（包括子文件夹）
     if (!folder && currentScanData && currentScanData.allFolders) {
-        folder = currentScanData.allFolders.find(f => f.name === folderName);
+        folder = currentScanData.allFolders.find(f => (folderPath && f.path === folderPath) || f.name === folderName);
     }
     
     // 4. 最后尝试从当前路径下的所有文件夹中查找
@@ -2368,7 +2534,7 @@ function drillDownFolder(folderName) {
             const cp = String(currentFolderPath || '');
             return fp.startsWith(cp + '/') || fp === cp;
         });
-        folder = currentPathFolders.find(f => f.name === folderName);
+        folder = currentPathFolders.find(f => (folderPath && f.path === folderPath) || f.name === folderName);
     }
     
     if (!folder) {
@@ -2380,7 +2546,7 @@ function drillDownFolder(folderName) {
     folderNavigationStack.push({
         folderPath: currentFolderPath,
         folderSizes: currentDisplayFolders.length > 0 ? currentDisplayFolders : currentScanData.folderSizes,
-        chartTitle: ((document.querySelector('#barChart').closest('.glass-panel') || document.querySelector('#barChart').closest('.card'))?.querySelector('h3')?.textContent) || '文件夹大小排名',
+        chartTitle: getChartTitle(),
         filteredFiles: filteredFiles,
         fileTableTitle: (document.getElementById('fileListTitle')?.textContent) || '大文件列表'
     });
@@ -2388,29 +2554,22 @@ function drillDownFolder(folderName) {
     // 设置当前文件夹路径
     currentFolderPath = folder.path;
     
-    // 过滤文件
-    filterFilesByFolder(folderName);
+    setChartTitle(`正在载入 - ${folder.name}`);
+    if (window.barChart) {
+        window.barChart.data.labels = ['正在载入子项'];
+        window.barChart.data.datasets[0].data = [0];
+        window.barChart.update();
+    }
 
-    // 更新图表（使用本地数据）
-    // 从 allFolders 中查找子文件夹
-    const subFolders = (currentScanData.allFolders || []).filter(f => {
-        const fp = String(f.path || '').replace(/\\/g, '/');
-        const cp = String(folder.path || '').replace(/\\/g, '/');
-        // 直接子文件夹: 路径以父路径开头，且相对路径中不包含更多斜杠
-        if (!fp.startsWith(cp + '/')) return false;
-        const rel = fp.slice(cp.length + 1);
-        return !rel.includes('/');
-    });
-
-    const directFiles = (currentScanData.allFiles || []).filter(f => {
-        const fp = String(f.path || '').replace(/\\/g, '/');
-        const cp = String(folder.path || '').replace(/\\/g, '/');
-        if (!fp.startsWith(cp + '/')) return false;
-        const rel = fp.slice(cp.length + 1);
-        return !rel.includes('/');
-    });
-
-    updateFolderSizeChartWithLocalData(subFolders, directFiles);
+    try {
+        const children = await loadFolderChildren(folder.path);
+        updateFileListForFolder(folder.name, children);
+        updateFolderSizeChartWithLocalData(children.subFolders || [], children.directFiles || []);
+    } catch (error) {
+        console.error(error);
+        showNotification(error.message || '读取文件夹子项失败', 'error');
+        updateFolderSizeChartWithLocalData([], []);
+    }
 }
 
 function updateFolderSizeChartWithLocalData(subFolders, directFiles) {
@@ -2480,14 +2639,9 @@ function updateFolderSizeChartWithLocalData(subFolders, directFiles) {
     }
     
     // 更新图表标题和返回按钮
-    const chartContainer = document.querySelector('#barChart')?.closest('.glass-panel');
-    if (chartContainer) {
-        const titleEl = chartContainer.querySelector('h3');
-        if (titleEl) titleEl.textContent = chartTitle;
-        
-        const backBtn = document.getElementById('chartBackBtn');
-        if (backBtn) backBtn.classList.remove('hidden');
-    }
+    setChartTitle(chartTitle);
+    const backBtn = document.getElementById('chartBackBtn');
+    if (backBtn) backBtn.classList.remove('hidden');
 }
 
 function navigateBack() {
@@ -2503,10 +2657,7 @@ function navigateBack() {
             if (ft) ft.textContent = prevState.fileTableTitle;
         }
         
-        const chartContainer = document.querySelector('#barChart')?.closest('.glass-panel');
-        if (chartContainer && prevState.chartTitle) {
-            chartContainer.querySelector('h3').textContent = prevState.chartTitle;
-        }
+        if (prevState.chartTitle) setChartTitle(prevState.chartTitle);
         
         // 恢复图表
         const actualItems = currentDisplayFolders;
@@ -2611,23 +2762,28 @@ function updateDuplicateTable() {
             iconStyle = 'color: #ffffff !important';
         }
 
+        const safeName = escapeHtml(file.name || '未知文件');
+        const safeNameAttr = escapeAttr(file.name || '未知文件');
+        const safePath = escapeHtml(file.path || '');
+        const safePathAttr = escapeAttr(file.path || '');
+
         return `
-        <tr class="border-t border-white/5 hover:bg-white/5 transition-colors group" data-file-path="${file.path}">
+        <tr class="border-t border-white/5 hover:bg-white/5 transition-colors group" data-file-path="${safePathAttr}" data-file-name="${safeNameAttr}">
             <td class="px-3 py-2 w-12 text-center">
-                <input type="checkbox" class="file-select rounded border-gray-600 bg-gray-800 text-accent-primary focus:ring-offset-0 focus:ring-1 focus:ring-accent-primary" data-file-path="${file.path}" onchange="toggleFileSelection(this)" ${isSelected ? 'checked' : ''}>
+                <input type="checkbox" class="file-select rounded border-gray-600 bg-gray-800 text-accent-primary focus:ring-offset-0 focus:ring-1 focus:ring-accent-primary" data-file-path="${safePathAttr}" onchange="toggleFileSelection(this)" ${isSelected ? 'checked' : ''}>
             </td>
             <td class="px-3 py-2">
                 <div class="flex items-center">
                     <div class="w-6 h-6 rounded-lg flex items-center justify-center mr-2 transition-colors" style="${iconContainerStyle}">
                         <i class="fas ${getFileIcon(file.type)}" style="${iconStyle}"></i>
                     </div>
-                    <span class="text-xs font-medium text-gray-200 truncate max-w-[400px]" title="${file.name}">
-                        ${file.name || '未知文件'}
+                    <span class="text-xs font-medium text-gray-200 truncate max-w-[400px]" title="${safeNameAttr}">
+                        ${safeName}
                     </span>
                 </div>
             </td>
             <td class="px-3 py-2">
-                <div class="text-xs text-gray-500 truncate max-w-[500px]" title="${file.path}">${file.path}</div>
+                <div class="text-xs text-gray-500 truncate max-w-[500px]" title="${safePathAttr}">${safePath}</div>
             </td>
             <td class="px-3 py-2 font-mono text-xs text-gray-300">
                 ${formatBytes(file.size)}
@@ -2638,7 +2794,7 @@ function updateDuplicateTable() {
                 </span>
             </td>
             <td class="px-3 py-2 text-right">
-                <button class="text-gray-500 hover:text-red-400 transition-colors p-2 rounded-lg hover:bg-white/5" title="删除" onclick="deleteFile('${file.path}','${file.name}')">
+                <button class="text-gray-500 hover:text-red-400 transition-colors p-2 rounded-lg hover:bg-white/5" title="删除" data-action="删除" data-file-path="${safePathAttr}" data-file-name="${safeNameAttr}">
                     <i class="fas fa-trash-alt"></i>
                 </button>
             </td>
@@ -2759,9 +2915,11 @@ function renderTimeline() {
         const date = new Date(item.timestamp);
         const timeStr = date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
         const sizeStr = formatBytes(item.data.totalSize);
+        const itemPath = escapeAttr(item.path);
+        const itemTs = Number(item.timestamp || 0);
         
         return `
-            <div class="relative mb-4 last:mb-0">
+            <button type="button" class="relative mb-4 last:mb-0 block w-full text-left rounded-lg p-2 transition-colors hover:bg-[rgba(10,132,255,.06)]" onclick="applyHistoryRecord('${itemPath}', ${itemTs})">
                 <div class="absolute -left-[25px] top-1 w-4 h-4 rounded-full bg-indigo-500 border-4 border-white dark:border-slate-800"></div>
                 <div class="mb-1 flex justify-between items-center">
                     <span class="text-xs font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded">${timeStr}</span>
@@ -2771,7 +2929,7 @@ function renderTimeline() {
                 <div class="text-xs text-slate-500 mt-1">
                     ${item.data.totalFiles.toLocaleString()} 个文件 · ${item.data.totalFolders.toLocaleString()} 个文件夹
                 </div>
-            </div>
+            </button>
         `;
     }).join('');
 
@@ -2784,6 +2942,60 @@ function renderTimeline() {
     ` : '';
 
     container.innerHTML = (listHtml || '<div class="text-sm text-slate-500">暂无历史记录</div>') + controlsHtml;
+}
+
+async function applyHistoryRecord(historyPath, timestamp) {
+    const list = scanHistory && scanHistory[historyPath];
+    if (!Array.isArray(list) || !list.length) {
+        showNotification('未找到这条历史记录', 'error');
+        return;
+    }
+
+    let record = list.find(item => Number(item.timestamp) === Number(timestamp));
+    try {
+        const response = await fetch(`/api/scan-history-record?path=${encodeURIComponent(historyPath)}&timestamp=${encodeURIComponent(timestamp)}`);
+        const result = await response.json();
+        if (result && result.success && result.data) {
+            record = result.data;
+        }
+    } catch (e) {
+        console.warn('读取历史快照失败，尝试使用已加载摘要:', e);
+    }
+
+    if (!record || !record.data) {
+        showNotification('历史记录内容不可用', 'error');
+        return;
+    }
+    if (!Array.isArray(record.data.allFiles) || !Array.isArray(record.data.allFolders)) {
+        showNotification('这条历史只有摘要数据，请重新扫描一次生成可回放快照', 'error');
+        return;
+    }
+
+    const folderIndex = savedFolderPaths.findIndex(folder => folder.path === historyPath);
+    if (folderIndex >= 0) {
+        currentFolderIndex = folderIndex;
+        selectedFolders = [savedFolderPaths[folderIndex]];
+        saveFoldersToLocalStorage();
+        updateFolderButton(savedFolderPaths[folderIndex].name);
+    }
+
+    currentScanData = record.data;
+    if (!Array.isArray(currentScanData.largeFiles) && Array.isArray(currentScanData.allFiles)) {
+        currentScanData.largeFiles = currentScanData.allFiles.slice(0, 100);
+    }
+    if (!Array.isArray(currentScanData.folderSizes) && Array.isArray(currentScanData.allFolders)) {
+        currentScanData.folderSizes = currentScanData.allFolders.slice(0, 50);
+    }
+    currentFolderPath = null;
+    folderNavigationStack = [];
+    updateAllDisplays();
+
+    const statusEl = document.getElementById('lastUpdatedText');
+    if (statusEl) {
+        lastStatusMessage = `上次扫描：${new Date(record.timestamp).toLocaleString()}`;
+        statusEl.textContent = lastStatusMessage;
+    }
+    showNotification(`已加载 ${new Date(record.timestamp).toLocaleString()} 的扫描结果`, 'success');
 }
 
 function toggleSelectAll(master) {
@@ -2852,7 +3064,7 @@ async function checkAuthStatus() {
     try {
         const res = await fetch('/api/auth/status');
         const data = await res.json();
-        if (data.success && data.hasPassword) {
+        if (data.success && data.hasPassword && !data.authenticated) {
             const modal = document.getElementById('loginModal');
             if (modal) modal.classList.remove('hidden');
         }
@@ -2874,6 +3086,9 @@ async function handleLogin(e) {
         if (data.success) {
             document.getElementById('loginModal').classList.add('hidden');
             document.getElementById('loginPassword').value = '';
+            await loadSavedFolders();
+            await loadScanHistoryFromServer();
+            updateLastScanStatus();
         } else {
             alert(data.error || '登录失败');
         }
