@@ -17,7 +17,7 @@ jobs:
 
     - name: Read app version
       id: app_version
-      run: echo "version=$(node -p \"require('./app/package.json').version\")" >> "$GITHUB_OUTPUT"
+      run: echo "version=$(jq -r .version app/package.json)" >> "$GITHUB_OUTPUT"
 
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
