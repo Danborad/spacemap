@@ -3,6 +3,7 @@ bin/
 dist/
 *.fpk
 *.qpkg
+*.upk
 /spacemap
 
 # Application Data

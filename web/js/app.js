@@ -244,10 +244,13 @@
             state.scansList = [];
             state.currentScanId = null;
             state.overviewData = null;
-            const isFnOS = state.rootsData && state.rootsData.platform === 'fnos';
-            const tip = isFnOS
-                ? '尚未检测到授权目录，请打开飞牛「应用中心 → SpaceMap 存储分析 → 应用设置 → 访问权限」添加允许访问的文件夹，保存后刷新即可。'
-                : '尚未发现可扫描目录，请前往「设置」添加或授权扫描路径。';
+            const platform = state.rootsData && state.rootsData.platform;
+            let tip = '尚未发现可扫描目录，请前往「设置」添加或授权扫描路径。';
+            if (platform === 'fnos') {
+                tip = '尚未检测到授权目录，请打开飞牛「应用中心 → SpaceMap 存储分析 → 应用设置 → 访问权限」添加允许访问的文件夹，保存后刷新即可。';
+            } else if (platform === 'ugos') {
+                tip = '尚未检测到授权目录，请打开绿联「应用中心 → SpaceMap → 应用设置 → 允许访问的文件夹」添加共享目录，保存后刷新即可。';
+            }
             toggleEmptyState(true, tip);
             updatePageHeader();
             return;
@@ -492,12 +495,16 @@
         } else {
             const qnapM = clean.match(/^\/share\/(?:[^/]+_DATA\/)?([^/]+)(?:\/(.*))?$/);
             const fnosM = clean.match(/^\/vol\d+\/\d+\/([^/]+)(?:\/(.*))?$/);
+            const ugosM = clean.match(/^\/volume\d+\/([^/]+)(?:\/(.*))?$/);
             if (qnapM) {
                 shareName = qnapM[1];
                 rel = qnapM[2] || '';
             } else if (fnosM) {
                 shareName = fnosM[1];
                 rel = fnosM[2] || '';
+            } else if (ugosM) {
+                shareName = ugosM[1];
+                rel = ugosM[2] || '';
             } else {
                 const segs = clean.split('/').filter(Boolean);
                 shareName = segs[0] || '';
@@ -995,12 +1002,15 @@
             tipEl.textContent = '飞牛 fnOS：请在「应用中心 → SpaceMap 存储分析 → 应用设置 → 访问权限」中添加允许访问的文件夹（保存后生效）。';
         } else if (data.platform === 'qnap') {
             tipEl.textContent = '威联通 QNAP：已自动识别 /share 下的共享文件夹，无需繁琐路径映射。';
+        } else if (data.platform === 'ugos') {
+            tipEl.textContent = '绿联 UGOS Pro：请在「应用中心 → SpaceMap → 应用设置」中勾选允许访问的共享文件夹（保存后实时生效，无需重启）。';
         } else {
             tipEl.textContent = `当前环境 (${data.platformLabel})：支持自动发现与手动追加合法目录路径。`;
         }
 
         const sourceLabel = (src) => {
             if (src === 'fnos:accessible') return '系统授权';
+            if (src === 'ugos:shared') return '绿联授权目录';
             if (src && src.startsWith('env:')) return '环境变量';
             if (src && src.startsWith('auto:')) return '自动发现';
             return src || '-';
@@ -1019,7 +1029,7 @@
                     <span class="badge badge-neutral">${U.escapeHtml(sourceLabel(r.source))}</span>
                 </div>
             </div>
-        `).join('') : '<div class="table-meta">暂无系统授权路径，请在飞牛应用设置中添加，或在上方手动添加。</div>';
+        `).join('') : '<div class="table-meta">暂无系统授权路径，请在 NAS 应用设置中添加，或在上方手动添加。</div>';
 
         const savedEl = document.getElementById('savedRootsList');
         const saved = data.saved || [];

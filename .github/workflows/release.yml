@@ -37,4 +37,5 @@ jobs:
             dist/bin/spacemap-linux-arm64
             dist/*.fpk
             dist/*.qpkg
+            dist/*.upk
             dist/checksums.txt

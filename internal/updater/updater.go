@@ -315,6 +315,8 @@ func (m *Manager) detectSelfUpdateCapability() (bool, string, string) {
 		return true, "支持套件内直接热更新并保留飞牛授权目录配置（注：飞牛应用中心卡片静态版本号仍以安装包 manifest 为准）", execPath
 	case config.PlatformQNAP:
 		return true, "支持套件内直接热更新并同步刷新威联通 App Center 版本记录", execPath
+	case config.PlatformUGOS:
+		return true, "支持套件内直接热更新并保留绿联授权目录配置", execPath
 	default:
 		return true, "支持在线热更新并同 PID 重启服务", execPath
 	}

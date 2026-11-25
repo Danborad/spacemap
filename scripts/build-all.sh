@@ -18,7 +18,7 @@ echo "==> 2. 交叉编译 Go 单二进制 (linux/amd64 & linux/arm64)..."
 (cd "${ROOT_DIR}" && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o "${BIN_DIR}/spacemap-linux-arm64" ./cmd/spacemap)
 
 echo "==> 3. 打包飞牛 fnOS (.fpk)..."
-chmod +x "${ROOT_DIR}/packaging/fpk/build-fpk.sh" "${ROOT_DIR}/packaging/qpkg/build-qpkg.sh"
+chmod +x "${ROOT_DIR}/packaging/fpk/build-fpk.sh" "${ROOT_DIR}/packaging/qpkg/build-qpkg.sh" "${ROOT_DIR}/packaging/upk/build-upk.sh"
 "${ROOT_DIR}/packaging/fpk/build-fpk.sh" x86 "${BIN_DIR}/spacemap-linux-amd64" "${VERSION}" "${ICONS_DIR}" "${DIST_DIR}"
 "${ROOT_DIR}/packaging/fpk/build-fpk.sh" arm64 "${BIN_DIR}/spacemap-linux-arm64" "${VERSION}" "${ICONS_DIR}" "${DIST_DIR}"
 
@@ -26,14 +26,17 @@ echo "==> 4. 打包威联通 QNAP (.qpkg)..."
 "${ROOT_DIR}/packaging/qpkg/build-qpkg.sh" x86_64 "${BIN_DIR}/spacemap-linux-amd64" "${VERSION}" "${ICONS_DIR}" "${DIST_DIR}"
 "${ROOT_DIR}/packaging/qpkg/build-qpkg.sh" arm_64 "${BIN_DIR}/spacemap-linux-arm64" "${VERSION}" "${ICONS_DIR}" "${DIST_DIR}"
 
-echo "==> 5. 生成 SHA-256 校验清单 (dist/checksums.txt)..."
+echo "==> 5. 打包绿联 UGOS Pro (.upk)..."
+"${ROOT_DIR}/packaging/upk/build-upk.sh" "${BIN_DIR}/spacemap-linux-amd64" "${BIN_DIR}/spacemap-linux-arm64" "${VERSION}" "${ICONS_DIR}" "${DIST_DIR}"
+
+echo "==> 6. 生成 SHA-256 校验清单 (dist/checksums.txt)..."
 (
     cd "${DIST_DIR}"
     {
         (cd bin && sha256sum spacemap-linux-amd64 spacemap-linux-arm64)
-        sha256sum ./*.fpk ./*.qpkg | sed 's|^\([a-f0-9]*  \)\./|\1|'
+        sha256sum ./*.fpk ./*.qpkg ./*.upk | sed 's|^\([a-f0-9]*  \)\./|\1|'
     } > checksums.txt
 )
 
 echo "==> 构建完成，产物列表:"
-ls -lh "${DIST_DIR}"/*.fpk "${DIST_DIR}"/*.qpkg "${DIST_DIR}/checksums.txt" "${BIN_DIR}"/*
+ls -lh "${DIST_DIR}"/*.fpk "${DIST_DIR}"/*.qpkg "${DIST_DIR}"/*.upk "${DIST_DIR}/checksums.txt" "${BIN_DIR}"/*

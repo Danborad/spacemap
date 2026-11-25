@@ -117,3 +117,45 @@ path = ` + extDir + `
 		t.Fatalf("expected [Public Work] on fallback, got %v", fallback)
 	}
 }
+
+func TestDiscoverUGOSSharedDirs(t *testing.T) {
+	tmp := t.TempDir()
+	sharedDir := filepath.Join(tmp, "ug_shared")
+	realShare := filepath.Join(tmp, "volume1", "Media")
+	subPlain := filepath.Join(sharedDir, "Docs")
+	for _, d := range []string{sharedDir, realShare, subPlain, filepath.Join(sharedDir, ".hidden"), filepath.Join(sharedDir, "@tmp")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(realShare, filepath.Join(sharedDir, "Media")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedDir, "ignore.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("UGAPP_SHARED_DIR", sharedDir)
+	t.Setenv("UGAPP_DATA_DIR", filepath.Join(tmp, "ug_data"))
+
+	if gotPlat := config.DetectPlatform(); gotPlat != config.PlatformUGOS {
+		t.Fatalf("expected PlatformUGOS, got %s", gotPlat)
+	}
+
+	cfg := &config.Config{
+		DataDir:  filepath.Join(tmp, "ug_data"),
+		Platform: config.PlatformUGOS,
+		Version:  config.DefaultVersion,
+	}
+	roots := cfg.DiscoverRoots()
+	if len(roots) != 2 {
+		t.Fatalf("expected 2 authorized UGOS roots, got %d (%+v)", len(roots), roots)
+	}
+	names := map[string]string{}
+	for _, r := range roots {
+		names[r.Name] = r.Source
+	}
+	if names["Media"] != "ugos:shared" || names["Docs"] != "ugos:shared" {
+		t.Fatalf("unexpected UGOS roots: %+v", roots)
+	}
+}

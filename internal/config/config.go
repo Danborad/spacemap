@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const DefaultVersion = "2.3.2"
+const DefaultVersion = "2.4.0"
 
 // PlatformType 标识当前运行环境类型。
 type PlatformType string
@@ -16,6 +16,7 @@ type PlatformType string
 const (
 	PlatformFnOS   PlatformType = "fnos"
 	PlatformQNAP   PlatformType = "qnap"
+	PlatformUGOS   PlatformType = "ugos"
 	PlatformDocker PlatformType = "docker"
 	PlatformLinux  PlatformType = "linux"
 )
@@ -45,6 +46,9 @@ func Load() *Config {
 	}
 
 	dataDir := strings.TrimSpace(os.Getenv("DATA_DIR"))
+	if dataDir == "" {
+		dataDir = strings.TrimSpace(os.Getenv("UGAPP_DATA_DIR"))
+	}
 	if dataDir == "" {
 		dataDir = filepath.Join(".", "data")
 	}
@@ -87,6 +91,9 @@ func DetectPlatform() PlatformType {
 	if pathExists("/.dockerenv") || os.Getenv("DOCKER_CONTAINER") != "" {
 		return PlatformDocker
 	}
+	if os.Getenv("UGAPP_DATA_DIR") != "" || os.Getenv("UGAPP_SHARED_DIR") != "" || os.Getenv("UGAPP_INSTALL_DIR") != "" {
+		return PlatformUGOS
+	}
 	if os.Getenv("TRIM_APPDEST") != "" || os.Getenv("TRIM_PKGVAR") != "" || pathExists("/usr/trim") {
 		return PlatformFnOS
 	}
@@ -96,13 +103,15 @@ func DetectPlatform() PlatformType {
 	return PlatformLinux
 }
 
-// PlatformLabel 返回友好的中文平台名称。
+// Label 返回友好的中文平台名称。
 func (p PlatformType) Label() string {
 	switch p {
 	case PlatformFnOS:
 		return "飞牛 fnOS"
 	case PlatformQNAP:
 		return "威联通 QNAP"
+	case PlatformUGOS:
+		return "绿联 UGOS Pro"
 	case PlatformDocker:
 		return "Docker 容器"
 	default:
@@ -176,6 +185,8 @@ func (c *Config) DiscoverRoots() []RootEntry {
 		// 不主动扫描系统 /vol* 挂载目录以免混入内部目录。
 	case PlatformQNAP:
 		DiscoverQNAPSharesFrom("/etc/config/smb.conf", "/share", addRootNamed)
+	case PlatformUGOS:
+		DiscoverUGOSSharedFrom(os.Getenv("UGAPP_SHARED_DIR"), addRootNamed)
 	case PlatformDocker:
 		if len(out) == 0 {
 			for _, candidate := range []string{"/media", "/host", "/data", "/mnt"} {
@@ -193,6 +204,26 @@ func (c *Config) DiscoverRoots() []RootEntry {
 	}
 
 	return out
+}
+
+// DiscoverUGOSSharedFrom 读取绿联 UGOS Pro 系统注入的 UGAPP_SHARED_DIR 下已授权的共享文件夹（含软链接）。
+func DiscoverUGOSSharedFrom(sharedDir string, addRoot func(rawPath, displayName, source string)) {
+	sharedDir = strings.TrimSpace(sharedDir)
+	if sharedDir == "" {
+		return
+	}
+	entries, err := os.ReadDir(sharedDir)
+	if err != nil {
+		return
+	}
+	for _, ent := range entries {
+		name := ent.Name()
+		if name == "" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "@") {
+			continue
+		}
+		full := filepath.Join(sharedDir, name)
+		addRoot(full, name, "ugos:shared")
+	}
 }
 
 // DiscoverQNAPSharesFrom 优先解析威联通 /etc/config/smb.conf 中的真实共享文件夹，

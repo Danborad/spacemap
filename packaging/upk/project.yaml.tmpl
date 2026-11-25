@@ -1,0 +1,37 @@
+spec_version: "2.1"
+app_id: com.danborad.spacemap
+version: __VERSION__
+support_arch:
+  - amd64
+  - arm64
+supports:
+  - pc
+  - app
+start_cmd: bin/spacemap
+port: 7080
+proxy_path: api
+open_type: inner
+tag_types:
+  - utility
+depend_fw_version: 1.13.0.0000
+permissions:
+  - NETWORK.ACCESS_INTERNET
+allow_add_access_path: true
+privacy_policy_link:
+  - https://github.com/Danborad/spacemap
+license_agreement_link:
+  - https://github.com/Danborad/spacemap
+source_code_link:
+  - https://github.com/Danborad/spacemap
+technical_support_link:
+  - https://github.com/Danborad/spacemap/issues
+
+i18n:
+  en-US:
+    name: SpaceMap
+    description: High-speed NAS storage space analyzer with directory treemap, file distribution, cold data & duplicate finder, scheduled snapshots and SMB path copy.
+    author: Danborad
+  zh-CN:
+    name: SpaceMap 存储分析
+    description: 高性能 NAS 磁盘空间分析工具，提供目录树图可视化、文件类型分布、重复与冷数据清理、定时快照及一键复制 SMB 路径。
+    author: Danborad

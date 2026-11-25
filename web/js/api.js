@@ -6,7 +6,8 @@ window.SpaceAPI = (function() {
     }
 
     async function request(url, options = {}) {
-        const res = await fetch(url, {
+        const reqUrl = url.startsWith('/api/') ? '.' + url : url;
+        const res = await fetch(reqUrl, {
             credentials: 'same-origin',
             headers: {
                 'Content-Type': 'application/json',
@@ -39,7 +40,7 @@ window.SpaceAPI = (function() {
         setUnauthorizedHandler,
         env: () => request('/api/env'),
         authStatus: async () => {
-            const res = await fetch('/api/auth/status', { credentials: 'same-origin' });
+            const res = await fetch('./api/auth/status', { credentials: 'same-origin' });
             return res.json();
         },
         login: (password) => request('/api/auth/login', {

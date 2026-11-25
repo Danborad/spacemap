@@ -101,7 +101,10 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 		if origin != "" {
 			u, err := url.Parse(origin)
-			if err != nil || u.Host != r.Host {
+			forwardedHost := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+			sameHost := err == nil && (u.Host == r.Host || (forwardedHost != "" && u.Host == forwardedHost))
+			viaUGOSGateway := err == nil && strings.TrimSpace(r.Header.Get("Ugreen-User-ID")) != ""
+			if !sameHost && !viaUGOSGateway {
 				writeJSONError(w, http.StatusForbidden, "跨域请求被拒绝")
 				return
 			}
