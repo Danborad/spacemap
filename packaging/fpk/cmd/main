@@ -1,0 +1,92 @@
+#!/bin/bash
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+APP_BIN="${TRIM_APPDEST}/bin/spacemap"
+
+mkdir -p "${TRIM_PKGVAR}"
+
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
+}
+
+write_runtime_paths() {
+    local tmp="${TRIM_PKGVAR}/fnos_paths.env.tmp"
+    {
+        printf 'TRIM_DATA_ACCESSIBLE_PATHS=%s\n' "${TRIM_DATA_ACCESSIBLE_PATHS:-}"
+        printf 'TRIM_DATA_SHARE_PATHS=%s\n' "${TRIM_DATA_SHARE_PATHS:-}"
+    } > "${tmp}" && mv -f "${tmp}" "${TRIM_PKGVAR}/fnos_paths.env"
+}
+
+check_process() {
+    local pid="$1"
+    [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
+}
+
+status() {
+    if [ -f "${PID_FILE}" ]; then
+        local pid
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if check_process "${pid}"; then
+            return 0
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    return 1
+}
+
+start_process() {
+    write_runtime_paths
+    if status; then
+        return 0
+    fi
+    log_msg "Starting SpaceMap on port 7080..."
+    PORT=7080 DATA_DIR="${TRIM_PKGVAR}" "${APP_BIN}" >> "${LOG_FILE}" 2>&1 &
+    printf "%s" "$!" > "${PID_FILE}"
+    sleep 1
+    if status; then
+        log_msg "Started with PID $(cat "${PID_FILE}")"
+        return 0
+    fi
+    log_msg "Failed to start SpaceMap"
+    return 1
+}
+
+stop_process() {
+    log_msg "Stopping SpaceMap..."
+    if [ -r "${PID_FILE}" ]; then
+        local pid
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if check_process "${pid}"; then
+            kill -TERM "${pid}" >> "${LOG_FILE}" 2>&1 || true
+            local count=0
+            while check_process "${pid}" && [ "${count}" -lt 10 ]; do
+                sleep 1
+                count=$((count + 1))
+            done
+            if check_process "${pid}"; then
+                kill -KILL "${pid}" >> "${LOG_FILE}" 2>&1 || true
+            fi
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    return 0
+}
+
+case "$1" in
+    start)
+        start_process
+        ;;
+    stop)
+        stop_process
+        ;;
+    status)
+        if status; then
+            exit 0
+        fi
+        exit 3
+        ;;
+    *)
+        exit 1
+        ;;
+esac

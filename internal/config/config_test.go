@@ -1,0 +1,119 @@
+package config_test
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"spacemap/internal/config"
+)
+
+func TestRuntimeEnvHotReload(t *testing.T) {
+	tmp := t.TempDir()
+	dataDir := filepath.Join(tmp, "data")
+	dirA := filepath.Join(tmp, "SSD")
+	dirB := filepath.Join(tmp, "Media")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dirA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dirB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		DataDir:  dataDir,
+		Platform: config.PlatformFnOS,
+		Version:  config.DefaultVersion,
+	}
+
+	// 初始空文件：应无目录
+	envPath := filepath.Join(dataDir, "fnos_paths.env")
+	if err := os.WriteFile(envPath, []byte("TRIM_DATA_ACCESSIBLE_PATHS=\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if roots := cfg.DiscoverRoots(); len(roots) != 0 {
+		t.Fatalf("expected 0 roots initially, got %d", len(roots))
+	}
+
+	// 模拟飞牛 config_callback 写入新增授权路径，无需重启进程立即生效
+	if err := os.WriteFile(envPath, []byte("TRIM_DATA_ACCESSIBLE_PATHS="+dirA+":"+dirB+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	roots := cfg.DiscoverRoots()
+	if len(roots) != 2 {
+		t.Fatalf("expected 2 hot-reloaded roots, got %d (%+v)", len(roots), roots)
+	}
+}
+
+func TestDiscoverQNAPSharesFiltering(t *testing.T) {
+	tmp := t.TempDir()
+	shareRoot := filepath.Join(tmp, "share")
+	cache1 := filepath.Join(shareRoot, "CACHEDEV1_DATA")
+	publicDir := filepath.Join(cache1, "Public")
+	workDir := filepath.Join(cache1, "Work")
+	extDir := filepath.Join(shareRoot, "external", ".nd", "0", "010746800-uuid")
+
+	for _, d := range []string{
+		publicDir,
+		workDir,
+		extDir,
+		filepath.Join(shareRoot, "HDP_DATA"),
+		filepath.Join(shareRoot, "HDZ_DATA"),
+		filepath.Join(shareRoot, "NFSv=4"),
+		filepath.Join(shareRoot, "homes"),
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(publicDir, filepath.Join(shareRoot, "Public")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(workDir, filepath.Join(shareRoot, "Work")); err != nil {
+		t.Fatal(err)
+	}
+
+	smbConf := filepath.Join(tmp, "smb.conf")
+	smbContent := `
+[global]
+workgroup = WORKGROUP
+
+[homes]
+path = ` + filepath.Join(shareRoot, "homes") + `
+
+[Public]
+path = ` + publicDir + `
+
+[Work]
+path = ` + workDir + `
+
+[绿联DXP4800]
+path = ` + extDir + `
+`
+	if err := os.WriteFile(smbConf, []byte(smbContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	config.DiscoverQNAPSharesFrom(smbConf, shareRoot, func(rawPath, displayName, source string) {
+		got = append(got, displayName+"="+rawPath)
+	})
+	if len(got) != 3 {
+		t.Fatalf("expected 3 shares from smb.conf, got %d: %v", len(got), got)
+	}
+	if got[2] != "绿联DXP4800="+extDir {
+		t.Fatalf("expected display name preserved for external share, got %q", got[2])
+	}
+
+	// 无 smb.conf 时回退：应过滤 HDP_DATA/HDZ_DATA/CACHEDEV1_DATA/NFSv=4/external/homes，仅保留软链接共享
+	var fallback []string
+	config.DiscoverQNAPSharesFrom(filepath.Join(tmp, "missing.conf"), shareRoot, func(rawPath, displayName, source string) {
+		fallback = append(fallback, displayName)
+	})
+	if len(fallback) != 2 || fallback[0] != "Public" || fallback[1] != "Work" {
+		t.Fatalf("expected [Public Work] on fallback, got %v", fallback)
+	}
+}

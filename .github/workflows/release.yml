@@ -1,0 +1,40 @@
+name: Build & Publish Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run unit tests
+        run: go test -v ./...
+
+      - name: Build all platform packages
+        run: ./scripts/build-all.sh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          overwrite_files: false
+          files: |
+            dist/bin/spacemap-linux-amd64
+            dist/bin/spacemap-linux-arm64
+            dist/*.fpk
+            dist/*.qpkg
+            dist/checksums.txt

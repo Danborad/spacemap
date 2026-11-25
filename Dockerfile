@@ -1,21 +1,35 @@
-FROM node:22-alpine
+# 编译阶段
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+
+ARG TARGETOS=linux
+ARG TARGETARCH
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY VERSION ./
+COPY cmd ./cmd
+COPY internal ./internal
+COPY web ./web
+
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/spacemap ./cmd/spacemap
+
+# 运行阶段
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
+COPY --from=builder /out/spacemap /app/spacemap
+COPY VERSION /app/VERSION
 
-# Copy dependency definitions
-COPY app/package*.json ./
+RUN mkdir -p /app/data
 
-# Install production dependencies
-RUN npm install --production
+ENV PORT=7080
+ENV DATA_DIR=/app/data
+ENV DOCKER_CONTAINER=1
 
-# Copy source code
-COPY app/ .
-
-# Create data directory
-RUN mkdir -p data
-
-# Expose port
 EXPOSE 7080
 
-# Start server
-CMD ["node", "server.js"]
+CMD ["/app/spacemap"]

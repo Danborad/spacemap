@@ -10,7 +10,6 @@ services:
       - /vol1/1000/share1:/vol1/1000/share1:ro
     environment:
       - PORT=7080
-      # 设置自动识别的扫描路径，多个路径用冒号 : 分隔
-      # 这里的路径必须与 volumes 中映射的容器内路径一致
+      - DATA_DIR=/app/data
       - TRIM_DATA_SHARE_PATHS=/vol1/1000/share1
     network_mode: host

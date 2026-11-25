@@ -1,5 +1,9 @@
-# Dependencies
-node_modules/
+# Go & Build Artifacts
+bin/
+dist/
+*.fpk
+*.qpkg
+/spacemap
 
 # Application Data
 data/*

@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpaceMap - 存储空间分析器</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <script>
+        (function() {
+            try {
+                var saved = localStorage.getItem('spacemap_theme') || 'auto';
+                var dark = saved === 'dark' || (saved === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+            } catch (e) {}
+        })();
+    </script>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="/assets/echarts.min.js"></script>
+</head>
+<body>
+    <div id="app" class="app-shell">
+        <!-- 1. 顶部融合导航栏 -->
+        <header class="topbar">
+            <div class="brand">
+                <div class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <linearGradient id="navSmBlue" x1="37" y1="11" x2="53" y2="27" gradientUnits="userSpaceOnUse">
+                                <stop offset="0%" stop-color="#38bdf8"/>
+                                <stop offset="100%" stop-color="#6366f1"/>
+                            </linearGradient>
+                        </defs>
+                        <rect width="64" height="64" rx="16" fill="#0f172a"/>
+                        <rect x="11" y="11" width="23" height="23" rx="5.5" fill="#ffffff"/>
+                        <rect x="37" y="11" width="16" height="16" rx="5" fill="url(#navSmBlue)"/>
+                        <rect x="37" y="30" width="16" height="23" rx="5" fill="#2dd4bf" fill-opacity="0.9"/>
+                        <rect x="11" y="37" width="23" height="16" rx="5" fill="#ffffff" fill-opacity="0.45"/>
+                    </svg>
+                </div>
+                <div class="brand-copy">
+                    <span class="brand-name">SpaceMap</span>
+                    <span id="appVersionBadge" class="version-pill">v2.3.2</span>
+                </div>
+            </div>
+
+            <nav class="top-nav" aria-label="主导航">
+                <button class="top-nav-btn active" data-view="overview">空间总览</button>
+                <button class="top-nav-btn" data-view="largeFiles">大文件</button>
+                <button class="top-nav-btn" data-view="duplicates">
+                    <span>重复清理</span>
+                    <span id="navDupCount" class="nav-count hidden">0</span>
+                </button>
+                <button class="top-nav-btn" data-view="coldFiles">冷数据</button>
+                <button class="top-nav-btn" data-view="history">历史趋势</button>
+                <button class="top-nav-btn" data-view="settings">
+                    <span>设置</span>
+                    <span id="navUpdateDot" class="nav-count hidden">新</span>
+                </button>
+            </nav>
+
+            <div class="top-controls">
+                <div class="root-selector-box">
+                    <span id="rwDot" class="rw-dot"></span>
+                    <select id="rootSelect" class="root-select" aria-label="选择扫描路径"></select>
+                    <span id="rwStatusBadge" class="rw-pill">检测中</span>
+                    <button id="refreshRootsBtn" class="root-refresh-btn" title="刷新授权目录" aria-label="刷新授权目录">
+                        <span data-icon="refresh"></span>
+                    </button>
+                </div>
+
+                <div class="theme-switcher" title="切换界面主题：浅色 / 深色 / 自动跟随系统">
+                    <button class="theme-btn" data-theme-choice="light">
+                        <span class="theme-ico" data-icon="sun"></span>
+                        <span>浅色</span>
+                    </button>
+                    <button class="theme-btn" data-theme-choice="dark">
+                        <span class="theme-ico" data-icon="moon"></span>
+                        <span>深色</span>
+                    </button>
+                    <button class="theme-btn" data-theme-choice="auto">自动</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- 2. 醒目页面标题区（Page Header） -->
+        <section class="page-header">
+            <div class="page-header-left">
+                <span class="header-accent-bar" aria-hidden="true"></span>
+                <div>
+                    <div class="page-title-row">
+                        <h1 id="pageHeroTitle" class="page-title">空间总览与目录树图</h1>
+                        <span id="pageHeroTag" class="page-tag hidden"></span>
+                    </div>
+                    <p id="pageHeroSub" class="page-sub">请选择授权目录并开始扫描分析</p>
+                </div>
+            </div>
+
+            <div class="page-header-actions">
+                <div class="btn-group">
+                    <button id="exportCsvBtn" class="btn btn-secondary">导出 CSV</button>
+                    <button id="exportJsonBtn" class="btn btn-secondary">JSON</button>
+                </div>
+                <button id="scanNowBtn" class="btn btn-gradient">
+                    <span data-icon="radar"></span>
+                    <span>立即扫描</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- 3. 实时扫描进度条 -->
+        <div id="scanProgressBanner" class="progress-banner hidden">
+            <div class="progress-info">
+                <div class="spinner"></div>
+                <div class="progress-texts">
+                    <div class="progress-title">
+                        正在扫描 <strong id="scanProgRoot"></strong>
+                        <span id="scanProgStats" class="progress-stats"></span>
+                    </div>
+                    <div id="scanProgPath" class="progress-path">准备中...</div>
+                </div>
+            </div>
+            <button id="cancelScanBtn" class="btn btn-danger btn-sm">取消扫描</button>
+        </div>
+
+        <!-- 4. 无快照引导页 -->
+        <div id="emptyStateHero" class="empty-hero hidden">
+            <div class="empty-hero-icon" data-icon="hardDrive"></div>
+            <h2>欢迎使用 SpaceMap 存储空间分析器</h2>
+            <p id="emptyStateDesc">当前路径尚未建立扫描快照，点击上方「立即扫描」开始分析空间占用、硬链接与重复文件。</p>
+            <div class="empty-hero-actions">
+                <button id="heroStartScanBtn" class="btn btn-gradient">立即开始首次扫描</button>
+                <button id="heroGoSettingsBtn" class="btn btn-secondary">管理扫描路径</button>
+            </div>
+        </div>
+
+        <!-- 5. 多视图内容区 -->
+        <main class="view-container">
+            <!-- 视图 1：空间总览与树图（双栏分屏工作台） -->
+            <section id="view-overview" class="view-panel active">
+                <!-- 5 列 KPI 指标带 -->
+                <div class="kpi-strip">
+                    <div class="kpi-cell">
+                        <div class="kpi-label">实际占用空间</div>
+                        <div id="kpiUniqueSize" class="kpi-val">0 B</div>
+                        <div id="kpiHardlinkSub" class="kpi-sub kpi-accent">逻辑总大小：0 B</div>
+                    </div>
+                    <div class="kpi-cell">
+                        <div class="kpi-label">硬链接节省</div>
+                        <div id="kpiHardlinkSaved" class="kpi-val">0 B</div>
+                        <div class="kpi-sub kpi-teal">inode 物理去重统计</div>
+                    </div>
+                    <div class="kpi-cell">
+                        <div class="kpi-label">文件与目录</div>
+                        <div id="kpiTotalFiles" class="kpi-val">0</div>
+                        <div id="kpiFoldersSub" class="kpi-sub">共 0 个目录</div>
+                    </div>
+                    <div class="kpi-cell">
+                        <div class="kpi-label">最大单文件</div>
+                        <div id="kpiLargestFile" class="kpi-val">0 B</div>
+                        <div id="kpiLargestSub" class="kpi-sub kpi-amber">当前目录树最大单体文件</div>
+                    </div>
+                    <div class="kpi-cell">
+                        <div class="kpi-label">较上次变化</div>
+                        <div id="kpiDeltaVal" class="kpi-val">基准</div>
+                        <div id="kpiScanTimeSub" class="kpi-sub kpi-indigo">等待首次扫描</div>
+                    </div>
+                </div>
+
+                <!-- 类型构成单行横条 -->
+                <div class="type-strip">
+                    <div class="type-strip-left">
+                        <span class="type-strip-title">类型构成</span>
+                        <div id="typeSegmentBar" class="segment-bar"></div>
+                    </div>
+                    <div id="typeSegmentReadout" class="type-strip-readout">悬停色块查看类型占用统计</div>
+                </div>
+
+                <!-- 核心双栏分屏：左交互 Treemap / 排行图，右 Node Inspector 实时详情 -->
+                <div class="split-board">
+                    <div class="split-left">
+                        <div class="split-toolbar">
+                            <div class="explorer-left-tools">
+                                <button id="explorerUpBtn" class="btn btn-secondary btn-sm" disabled>返回上级</button>
+                                <div id="explorerBreadcrumbs" class="breadcrumbs"></div>
+                            </div>
+                            <div class="explorer-right-tools">
+                                <select id="explorerTopLimit" class="select-input select-sm" aria-label="显示数量">
+                                    <option value="12">Top 12</option>
+                                    <option value="20" selected>Top 20</option>
+                                    <option value="50">Top 50</option>
+                                </select>
+                                <div class="segmented" id="overviewChartMode">
+                                    <button class="seg-btn active" data-mode="treemap">矩形树图</button>
+                                    <button class="seg-btn" data-mode="bar">占比排行</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="overviewFolderChart" class="chart-stage"></div>
+                    </div>
+
+                    <div class="split-right">
+                        <div class="inspector-head">
+                            <div class="inspector-head-info">
+                                <div class="inspector-kicker">NODE INSPECTOR // 节点实时详情</div>
+                                <div id="inspectorTitle" class="inspector-path">-</div>
+                            </div>
+                            <div class="inspector-head-actions">
+                                <button id="inspectorCopySmbBtn" class="btn btn-secondary btn-sm hidden" title="复制该目录的 SMB 网络路径">复制 SMB</button>
+                                <span id="inspectorSize" class="inspector-size-badge">0 B</span>
+                            </div>
+                        </div>
+
+                        <div id="inspectorList" class="inspector-list"></div>
+
+                        <div class="inspector-foot">
+                            <div class="inspector-foot-left">
+                                <label class="check-all-inline">
+                                    <input type="checkbox" id="inspectorSelectAll">
+                                    <span>全选文件</span>
+                                </label>
+                                <button id="inspectorBulkDeleteBtn" class="btn btn-danger btn-sm hidden">删除选中</button>
+                            </div>
+                            <button id="inspectorDrillBtn" class="btn btn-secondary btn-sm hidden">下钻该目录 →</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 视图 2：大文件排行 -->
+            <section id="view-largeFiles" class="view-panel">
+                <div class="panel-body">
+                    <div class="filter-bar">
+                        <div class="filter-inputs">
+                            <input type="text" id="fileSearchInput" class="text-input" placeholder="搜索文件名或完整路径...">
+                            <select id="fileTypeSelect" class="select-input">
+                                <option value="all">全部类型</option>
+                                <option value="video">视频</option>
+                                <option value="image">图片</option>
+                                <option value="audio">音频</option>
+                                <option value="document">文档</option>
+                                <option value="archive">压缩包</option>
+                                <option value="code">代码/配置</option>
+                                <option value="other">其他</option>
+                            </select>
+                            <select id="fileMinSizeSelect" class="select-input">
+                                <option value="0">不限大小</option>
+                                <option value="1048576">≥ 1 MB</option>
+                                <option value="10485760">≥ 10 MB</option>
+                                <option value="104857600" selected>≥ 100 MB</option>
+                                <option value="1073741824">≥ 1 GB</option>
+                            </select>
+                            <select id="fileSortSelect" class="select-input">
+                                <option value="size:desc">按大小从大到小</option>
+                                <option value="mtime:asc">按修改时间从旧到新</option>
+                                <option value="mtime:desc">按修改时间从新到旧</option>
+                                <option value="name:asc">按文件名 A-Z</option>
+                            </select>
+                            <button id="fileFilterBtn" class="btn btn-secondary">筛选</button>
+                        </div>
+                        <button id="largeBulkDeleteBtn" class="btn btn-danger hidden">删除选中</button>
+                    </div>
+
+                    <div id="largeFilesSummary" class="table-meta"></div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-check"><input type="checkbox" id="largeSelectAll"></th>
+                                    <th>文件名</th>
+                                    <th>所在路径</th>
+                                    <th class="col-size">大小</th>
+                                    <th class="col-type">类型</th>
+                                    <th class="col-time">修改时间</th>
+                                    <th class="col-act">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="largeFilesBody"></tbody>
+                        </table>
+                    </div>
+                    <div id="largeFilesPager" class="pager"></div>
+                </div>
+            </section>
+
+            <!-- 视图 3：重复文件精确清理 -->
+            <section id="view-duplicates" class="view-panel">
+                <div class="panel-body">
+                    <div class="filter-bar">
+                        <div class="filter-inputs">
+                            <label class="inline-label" for="dupMinSizeSelect">最小查重阈值：</label>
+                            <select id="dupMinSizeSelect" class="select-input">
+                                <option value="1024">≥ 1 KB（严格排查）</option>
+                                <option value="1048576" selected>≥ 1 MB（推荐）</option>
+                                <option value="10485760">≥ 10 MB</option>
+                                <option value="104857600">≥ 100 MB</option>
+                            </select>
+                            <button id="runDupCheckBtn" class="btn btn-gradient">开始精确查重 (SHA-256)</button>
+                            <button id="dupSelectKeepNewestBtn" class="btn btn-secondary hidden">保留最新 · 勾选旧副本</button>
+                            <button id="dupSelectKeepOldestBtn" class="btn btn-secondary hidden">保留最旧 · 勾选新副本</button>
+                        </div>
+                        <button id="dupBulkDeleteBtn" class="btn btn-danger hidden">删除选中副本</button>
+                    </div>
+                    <div id="dupSummary" class="table-meta">系统将先按文件大小分组，再对比首尾 64KB 与全量 SHA-256 哈希，且自动跳过硬链接，避免误报。</div>
+                    <div id="dupGroupsContainer" class="dup-groups"></div>
+                </div>
+            </section>
+
+            <!-- 视图 4：沉睡冷数据 -->
+            <section id="view-coldFiles" class="view-panel">
+                <div class="panel-body">
+                    <div class="filter-bar">
+                        <div class="filter-inputs">
+                            <label class="inline-label" for="coldDaysSelect">未修改时长：</label>
+                            <select id="coldDaysSelect" class="select-input">
+                                <option value="90">超过 90 天</option>
+                                <option value="180" selected>超过 180 天（半年）</option>
+                                <option value="365">超过 365 天（1 年）</option>
+                                <option value="730">超过 730 天（2 年）</option>
+                            </select>
+                            <select id="coldMinSizeSelect" class="select-input">
+                                <option value="0">全部大小</option>
+                                <option value="10485760" selected>≥ 10 MB</option>
+                                <option value="104857600">≥ 100 MB</option>
+                                <option value="1073741824">≥ 1 GB</option>
+                            </select>
+                            <button id="coldRefreshBtn" class="btn btn-secondary">筛选冷数据</button>
+                        </div>
+                        <button id="coldBulkDeleteBtn" class="btn btn-danger hidden">清理选中冷数据</button>
+                    </div>
+                    <div id="coldSummary" class="table-meta"></div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-check"><input type="checkbox" id="coldSelectAll"></th>
+                                    <th>文件名</th>
+                                    <th>所在路径</th>
+                                    <th class="col-size">大小</th>
+                                    <th class="col-type">类型</th>
+                                    <th class="col-time">最后修改</th>
+                                    <th class="col-act">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="coldFilesBody"></tbody>
+                        </table>
+                    </div>
+                    <div id="coldFilesPager" class="pager"></div>
+                </div>
+            </section>
+
+            <!-- 视图 5：历史趋势 -->
+            <section id="view-history" class="view-panel">
+                <div class="panel-body space-gap">
+                    <div class="inner-card">
+                        <div class="card-head">
+                            <div>
+                                <h3 class="card-title">存储空间增长曲线</h3>
+                                <div class="card-sub">最近 5 次已完成扫描保留完整文件树明细，更早记录自动精简为摘要点</div>
+                            </div>
+                        </div>
+                        <div id="historyTrendChart" class="trend-chart-box"></div>
+                    </div>
+
+                    <div class="inner-card">
+                        <div class="card-head">
+                            <div>
+                                <h3 class="card-title">扫描记录档案</h3>
+                                <div class="card-sub">点击「加载快照」可切换到任意一次保留明细的历史快照进行回溯分析</div>
+                            </div>
+                        </div>
+                        <div class="table-wrap">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>时间</th>
+                                        <th>扫描根目录</th>
+                                        <th>状态</th>
+                                        <th class="col-size">实际占用</th>
+                                        <th class="col-num">硬链接节省</th>
+                                        <th class="col-num">文件 / 文件夹</th>
+                                        <th class="col-act">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="historyTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 视图 6：设置与任务计划 -->
+            <section id="view-settings" class="view-panel">
+                <div class="panel-body">
+                    <div class="settings-grid">
+                        <div class="inner-card">
+                            <div class="card-head">
+                                <div>
+                                    <h3 class="card-title">扫描目录管理</h3>
+                                    <div id="platformPathTip" class="card-sub">管理授权及自定义扫描路径</div>
+                                </div>
+                                <span id="platformBadge" class="badge badge-neutral">检测中</span>
+                            </div>
+                            <div class="add-path-row">
+                                <input type="text" id="newFolderPathInput" class="text-input" placeholder="输入宿主机绝对路径，如 /vol2/1000/SSD 或 /share/Public">
+                                <button id="addFolderPathBtn" class="btn btn-gradient">添加路径</button>
+                            </div>
+                            <div class="path-group">
+                                <h4>系统授权 / 自动发现路径</h4>
+                                <div id="discoveredRootsList" class="path-list"></div>
+                            </div>
+                            <div class="path-group">
+                                <h4>手动保存的扫描路径</h4>
+                                <div id="savedRootsList" class="path-list"></div>
+                            </div>
+                        </div>
+
+                        <div class="inner-card">
+                            <div class="card-head">
+                                <div>
+                                    <h3 class="card-title">定时自动扫描计划</h3>
+                                    <div class="card-sub">定期自动统计增量变化，形成存储增长曲线</div>
+                                </div>
+                            </div>
+                            <form id="scheduleForm" class="form-stack">
+                                <label class="switch-row">
+                                    <input type="checkbox" id="schedEnabled">
+                                    <span>启用后台定时扫描</span>
+                                </label>
+                                <div class="form-row">
+                                    <div class="form-field">
+                                        <label for="schedMode">执行频率</label>
+                                        <select id="schedMode" class="select-input">
+                                            <option value="daily">每天定时</option>
+                                            <option value="weekly">每周定时</option>
+                                            <option value="interval">固定小时间隔</option>
+                                        </select>
+                                    </div>
+                                    <div id="schedWeekdayWrap" class="form-field hidden">
+                                        <label for="schedWeekday">星期几</label>
+                                        <select id="schedWeekday" class="select-input">
+                                            <option value="0">周日</option>
+                                            <option value="1">周一</option>
+                                            <option value="2">周二</option>
+                                            <option value="3">周三</option>
+                                            <option value="4">周四</option>
+                                            <option value="5">周五</option>
+                                            <option value="6">周六</option>
+                                        </select>
+                                    </div>
+                                    <div id="schedTimeWrap" class="form-field">
+                                        <label for="schedHour">执行时间</label>
+                                        <div class="time-pair">
+                                            <input type="number" id="schedHour" class="text-input" min="0" max="23" value="3">
+                                            <span>:</span>
+                                            <input type="number" id="schedMinute" class="text-input" min="0" max="59" value="0">
+                                        </div>
+                                    </div>
+                                    <div id="schedIntervalWrap" class="form-field hidden">
+                                        <label for="schedIntervalHours">每隔（小时）</label>
+                                        <input type="number" id="schedIntervalHours" class="text-input" min="1" max="720" value="24">
+                                    </div>
+                                </div>
+                                <div id="schedLastRunText" class="table-meta"></div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn btn-gradient">保存定时计划</button>
+                                </div>
+                            </form>
+
+                            <hr class="divider">
+
+                            <div class="card-head">
+                                <div>
+                                    <h3 class="card-title">访问密码与安全</h3>
+                                    <div class="card-sub">设置后进入页面及调用 API 均需密码登录（Session 持久化保存在数据库）</div>
+                                </div>
+                            </div>
+                            <form id="passwordForm" class="form-stack">
+                                <div class="form-field">
+                                    <label for="oldPwdInput">当前密码（首次设置请留空）</label>
+                                    <input type="password" id="oldPwdInput" class="text-input" autocomplete="current-password">
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-field">
+                                        <label for="newPwdInput">新密码（留空则关闭密码保护）</label>
+                                        <input type="password" id="newPwdInput" class="text-input" autocomplete="new-password">
+                                    </div>
+                                    <div class="form-field">
+                                        <label for="confirmPwdInput">确认新密码</label>
+                                        <input type="password" id="confirmPwdInput" class="text-input" autocomplete="new-password">
+                                    </div>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn btn-secondary">更新访问密码</button>
+                                    <button type="button" id="logoutBtn" class="btn btn-secondary hidden">退出当前登录</button>
+                                </div>
+                            </form>
+
+                            <hr class="divider">
+
+                            <div class="card-head">
+                                <div>
+                                    <h3 class="card-title">版本与在线更新</h3>
+                                    <div class="card-sub">支持飞牛 fnOS / 威联通 QNAP 套件内热更新与 SHA-256 校验，自动保留权限与扫描数据</div>
+                                </div>
+                                <span id="updateStateBadge" class="badge badge-neutral">未检查</span>
+                            </div>
+
+                            <div class="update-meta-grid">
+                                <div class="update-meta-item">
+                                    <span class="update-meta-label">当前版本</span>
+                                    <strong id="updateCurVerText">-</strong>
+                                </div>
+                                <div class="update-meta-item">
+                                    <span class="update-meta-label">最新版本</span>
+                                    <strong id="updateLatestVerText">待检查</strong>
+                                </div>
+                                <div class="update-meta-item">
+                                    <span class="update-meta-label">运行平台 / 架构</span>
+                                    <strong id="updateEnvText">-</strong>
+                                </div>
+                            </div>
+
+                            <div id="updateTipText" class="table-meta" style="margin-top:10px;"></div>
+                            <div class="update-repo-row">
+                                <span>项目仓库：</span>
+                                <a id="updateRepoLink" href="https://github.com/Danborad/spacemap" target="_blank" rel="noopener noreferrer">https://github.com/Danborad/spacemap</a>
+                            </div>
+
+                            <div id="updateNotesBox" class="update-notes hidden"></div>
+
+                            <div id="updateProgressWrap" class="update-progress-wrap hidden">
+                                <div class="update-progress-track">
+                                    <div id="updateProgressBar" class="update-progress-fill" style="width:0%"></div>
+                                </div>
+                                <div id="updateProgressText" class="table-meta" style="margin-top:6px;">准备中...</div>
+                            </div>
+
+                            <div class="form-actions" style="margin-top:12px;">
+                                <button type="button" id="checkUpdateBtn" class="btn btn-secondary">检查更新</button>
+                                <button type="button" id="applyUpdateBtn" class="btn btn-gradient hidden">一键更新并重启</button>
+                                <a id="releaseLinkBtn" class="btn btn-ghost hidden" target="_blank" rel="noopener noreferrer">查看发布页</a>
+                            </div>
+
+                            <form id="updateConfigForm" class="form-stack" style="margin-top:16px;">
+                                <label class="switch-row">
+                                    <input type="checkbox" id="updAutoCheck">
+                                    <span>后台自动检查更新（仅提示，不自动重启）</span>
+                                </label>
+                                <div class="form-row">
+                                    <div class="form-field">
+                                        <label for="updRepoInput">发布源仓库 (owner/repo 或清单 URL)</label>
+                                        <input type="text" id="updRepoInput" class="text-input" placeholder="Danborad/spacemap">
+                                    </div>
+                                    <div class="form-field">
+                                        <label for="updProxyInput">GitHub 加速代理前缀（可选）</label>
+                                        <input type="text" id="updProxyInput" class="text-input" placeholder="例如 https://ghfast.top/">
+                                    </div>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn btn-secondary">保存更新设置</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- 登录遮罩弹窗 -->
+    <div id="loginModal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-dialog modal-sm">
+            <div class="login-icon" data-icon="lock"></div>
+            <h3>访问验证</h3>
+            <p>SpaceMap 已启用访问密码保护，请输入密码解锁</p>
+            <form id="loginForm" class="form-stack">
+                <input type="password" id="loginPasswordInput" class="text-input text-center" placeholder="请输入访问密码" required autofocus>
+                <button type="submit" class="btn btn-gradient full-width">解锁进入</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 文件详情弹窗 -->
+    <div id="detailModal" class="modal hidden">
+        <div class="modal-backdrop" data-close-modal="detailModal"></div>
+        <div class="modal-dialog">
+            <div class="modal-head">
+                <h3>文件详细信息</h3>
+                <button class="icon-btn" data-close-modal="detailModal" aria-label="关闭">&times;</button>
+            </div>
+            <div id="detailModalBody" class="detail-body"></div>
+            <div class="modal-foot">
+                <button class="btn btn-secondary" data-close-modal="detailModal">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 取消扫描选择弹窗 -->
+    <div id="cancelScanModal" class="modal hidden">
+        <div class="modal-backdrop" data-close-modal="cancelScanModal"></div>
+        <div class="modal-dialog">
+            <div class="modal-head">
+                <h3>取消当前扫描？</h3>
+                <button class="icon-btn" data-close-modal="cancelScanModal" aria-label="关闭">&times;</button>
+            </div>
+            <div id="cancelScanModalDesc" class="confirm-desc"></div>
+            <div class="modal-foot">
+                <button id="cancelScanContinueBtn" class="btn btn-secondary">继续扫描</button>
+                <button id="cancelScanDiscardBtn" class="btn btn-danger">丢弃数据</button>
+                <button id="cancelScanKeepBtn" class="btn btn-primary">保留已扫数据</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 危险操作二次确认弹窗 -->
+    <div id="confirmModal" class="modal hidden">
+        <div class="modal-backdrop" data-close-modal="confirmModal"></div>
+        <div class="modal-dialog">
+            <div class="modal-head">
+                <h3 id="confirmModalTitle">确认操作</h3>
+                <button class="icon-btn" data-close-modal="confirmModal" aria-label="关闭">&times;</button>
+            </div>
+            <div id="confirmModalDesc" class="confirm-desc"></div>
+            <ul id="confirmModalList" class="confirm-list hidden"></ul>
+            <div class="modal-foot">
+                <button id="confirmCancelBtn" class="btn btn-secondary">取消</button>
+                <button id="confirmOkBtn" class="btn btn-danger">确认永久删除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 消息容器 -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="/js/utils.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/charts.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>
