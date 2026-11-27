@@ -80,6 +80,8 @@
         coldSelected: new Set(),
 
         eventSource: null,
+        scanPollTimer: null,
+        lastSseAt: 0,
         wasScanning: false
     };
 
@@ -166,6 +168,7 @@
         await loadSchedule();
         await refreshScansAndView();
         loadUpdateStatus(true).catch(() => {});
+        syncScanStatusOnce().catch(() => {});
         connectSSE();
     }
 
@@ -1409,6 +1412,35 @@
         btn.textContent = `删除选中 (${n})`;
     }
 
+    async function syncScanStatusOnce() {
+        const snap = await API.scanStatus();
+        if (snap) {
+            handleProgressSnapshot(snap);
+        }
+    }
+
+    function stopScanPolling() {
+        if (state.scanPollTimer) {
+            clearInterval(state.scanPollTimer);
+            state.scanPollTimer = null;
+        }
+    }
+
+    function ensureScanPolling() {
+        if (state.scanPollTimer) return;
+        state.scanPollTimer = setInterval(async () => {
+            if (Date.now() - state.lastSseAt < 1500) {
+                return;
+            }
+            try {
+                const snap = await API.scanStatus();
+                if (snap) {
+                    handleProgressSnapshot(snap);
+                }
+            } catch (_) {}
+        }, 600);
+    }
+
     function connectSSE() {
         if (state.eventSource) {
             state.eventSource.close();
@@ -1417,26 +1449,47 @@
         state.eventSource = es;
         es.addEventListener('progress', ev => {
             try {
+                state.lastSseAt = Date.now();
                 handleProgressSnapshot(JSON.parse(ev.data));
             } catch (_) {}
         });
+        es.onerror = () => {
+            if (state.wasScanning) {
+                ensureScanPolling();
+            }
+        };
     }
 
     function handleProgressSnapshot(snap) {
         const banner = document.getElementById('scanProgressBanner');
         const scanBtn = document.getElementById('scanNowBtn');
+        const heroScanBtn = document.getElementById('heroStartScanBtn');
 
         if (snap && snap.running) {
             state.wasScanning = true;
             banner.classList.remove('hidden');
             scanBtn.disabled = true;
+            if (heroScanBtn) {
+                heroScanBtn.disabled = true;
+                heroScanBtn.textContent = '扫描进行中...';
+            }
+            const filesCount = Number(snap.scannedFiles) || 0;
+            const foldersCount = Number(snap.scannedFolders) || 0;
+            const uniqueBytes = Number(snap.uniqueSize) || 0;
+            const elapsedMs = Number(snap.elapsedMs) || 0;
             document.getElementById('scanProgRoot').textContent = snap.rootPath || '';
             document.getElementById('scanProgStats').textContent =
-                `已扫描 ${snap.scannedFiles.toLocaleString()} 文件 · ${snap.scannedFolders.toLocaleString()} 目录 · ${U.formatBytes(snap.uniqueSize)} · ${U.formatDuration(snap.elapsedMs)}`;
-            document.getElementById('scanProgPath').textContent = snap.currentPath || '';
+                `已扫描 ${filesCount.toLocaleString()} 文件 · ${foldersCount.toLocaleString()} 目录 · ${U.formatBytes(uniqueBytes)} · ${U.formatDuration(elapsedMs)}`;
+            document.getElementById('scanProgPath').textContent = snap.currentPath || '正在扫描...';
+            ensureScanPolling();
         } else {
+            stopScanPolling();
             banner.classList.add('hidden');
             scanBtn.disabled = false;
+            if (heroScanBtn) {
+                heroScanBtn.disabled = false;
+                heroScanBtn.textContent = '立即开始首次扫描';
+            }
             if (state.wasScanning && snap && snap.scanId) {
                 state.wasScanning = false;
                 if (snap.status === 'completed') {
@@ -1461,8 +1514,20 @@
             return;
         }
         try {
-            await API.startScan(state.selectedRootPath);
-            U.toast('已启动后台扫描任务', 'info');
+            const res = await API.startScan(state.selectedRootPath);
+            handleProgressSnapshot({
+                running: true,
+                scanId: res && res.scanId,
+                rootPath: (res && res.rootPath) || state.selectedRootPath,
+                scannedFiles: 0,
+                scannedFolders: 0,
+                uniqueSize: 0,
+                elapsedMs: 0,
+                currentPath: '正在启动扫描引擎...'
+            });
+            syncScanStatusOnce().catch(() => {});
+            ensureScanPolling();
+            U.toast('已开始扫描，正在实时统计空间占用', 'info');
         } catch (err) {
             U.toast(err.message, 'error');
         }
@@ -1525,6 +1590,8 @@
             btn.textContent = keepPartial ? '正在保存...' : '正在取消...';
             try {
                 await API.cancelScan(keepPartial);
+                syncScanStatusOnce().catch(() => {});
+                ensureScanPolling();
             } catch (err) {
                 U.toast(err.message || '取消失败', 'error');
             } finally {
