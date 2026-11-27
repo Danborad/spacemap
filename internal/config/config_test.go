@@ -218,3 +218,39 @@ func TestUGOSDynamicPortAndScanPaths(t *testing.T) {
 		t.Fatalf("expected 3 merged roots with delimiter parsing, got %d (%+v)", len(rootsDelim), rootsDelim)
 	}
 }
+
+func TestDiscoverUGOSVolumeNestedShares(t *testing.T) {
+	tmp := t.TempDir()
+	sharedDir := filepath.Join(tmp, "ug_shared")
+
+	share1 := filepath.Join(sharedDir, "volume1", "share1")
+	share2 := filepath.Join(sharedDir, "volume2", "share2")
+	share3 := filepath.Join(sharedDir, "volume3", "share3")
+	dupVol1 := filepath.Join(sharedDir, "volume1", "Media")
+	dupVol2 := filepath.Join(sharedDir, "volume2", "Media")
+	emptyVol4 := filepath.Join(sharedDir, "volume4")
+	for _, d := range []string{share1, share2, share3, dupVol1, dupVol2, emptyVol4} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var got []config.RootEntry
+	config.DiscoverUGOSSharedFrom(sharedDir, func(rawPath, displayName, source string) {
+		got = append(got, config.RootEntry{Path: rawPath, Name: displayName, Source: source})
+	})
+
+	if len(got) != 5 {
+		t.Fatalf("expected 5 expanded UGOS shares (excluding empty volume4 and volume containers), got %d: %+v", len(got), got)
+	}
+	names := map[string]string{}
+	for _, r := range got {
+		names[r.Name] = r.Path
+	}
+	if names["share1"] != share1 || names["share2"] != share2 || names["share3"] != share3 {
+		t.Fatalf("expected share1/share2/share3 directly discovered, got: %+v", got)
+	}
+	if names["Media (volume1)"] != dupVol1 || names["Media (volume2)"] != dupVol2 {
+		t.Fatalf("expected duplicate share names disambiguated with volume name, got: %+v", got)
+	}
+}

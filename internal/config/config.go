@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-const DefaultVersion = "2.4.1"
+const DefaultVersion = "2.4.2"
 
 // PlatformType 标识当前运行环境类型。
 type PlatformType string
@@ -220,7 +221,15 @@ func (c *Config) DiscoverRoots() []RootEntry {
 	return out
 }
 
-// DiscoverUGOSSharedFrom 读取绿联 UGOS Pro 系统注入的 UGAPP_SHARED_DIR 下已授权的共享文件夹（含软链接）。
+type ugosCandidate struct {
+	path   string
+	name   string
+	parent string
+}
+
+// DiscoverUGOSSharedFrom 读取绿联 UGOS Pro 系统注入的 UGAPP_SHARED_DIR 下已授权文件夹。
+// 绿联通常在 shared/ 下按卷组织目录（如 shared/volume1/share1、shared/usbs/disk1、shared/home/user），
+// 顶层容器（如 volume1）往往仅可读，真正被授权读写的共享目录位于其下一层，因此会自动展开到共享目录层级。
 func DiscoverUGOSSharedFrom(sharedDir string, addRoot func(rawPath, displayName, source string)) {
 	sharedDir = strings.TrimSpace(sharedDir)
 	if sharedDir == "" {
@@ -230,14 +239,110 @@ func DiscoverUGOSSharedFrom(sharedDir string, addRoot func(rawPath, displayName,
 	if err != nil {
 		return
 	}
+
+	var candidates []ugosCandidate
+	nameCount := make(map[string]int)
+	appendCandidate := func(path, name, parent string) {
+		candidates = append(candidates, ugosCandidate{path: path, name: name, parent: parent})
+		nameCount[name]++
+	}
+
 	for _, ent := range entries {
 		name := ent.Name()
 		if name == "" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "@") {
 			continue
 		}
 		full := filepath.Join(sharedDir, name)
-		addRoot(full, name, "ugos:shared")
+		info, statErr := os.Stat(full)
+		if statErr != nil || !info.IsDir() {
+			continue
+		}
+
+		switch {
+		case isUGOSVolumeContainer(name):
+			subEntries, subErr := os.ReadDir(full)
+			if subErr != nil {
+				continue
+			}
+			for _, sub := range subEntries {
+				subName := sub.Name()
+				if subName == "" || strings.HasPrefix(subName, ".") || strings.HasPrefix(subName, "@") {
+					continue
+				}
+				subFull := filepath.Join(full, subName)
+				if subInfo, err := os.Stat(subFull); err == nil && subInfo.IsDir() {
+					appendCandidate(subFull, subName, name)
+				}
+			}
+		case isUGOSUserContainer(name):
+			subEntries, subErr := os.ReadDir(full)
+			if subErr != nil {
+				continue
+			}
+			for _, sub := range subEntries {
+				subName := sub.Name()
+				if subName == "" || strings.HasPrefix(subName, ".") || strings.HasPrefix(subName, "@") {
+					continue
+				}
+				subFull := filepath.Join(full, subName)
+				subInfo, err := os.Stat(subFull)
+				if err != nil || !subInfo.IsDir() {
+					continue
+				}
+				// 若用户容器目录本身只读且包含授权子目录（例如 home/user/documents），展开到子目录
+				expanded := false
+				if !IsPathWritable(subFull) {
+					if leafEntries, leafErr := os.ReadDir(subFull); leafErr == nil {
+						for _, leaf := range leafEntries {
+							leafName := leaf.Name()
+							if leafName == "" || strings.HasPrefix(leafName, ".") || strings.HasPrefix(leafName, "@") {
+								continue
+							}
+							leafFull := filepath.Join(subFull, leafName)
+							if leafInfo, err := os.Stat(leafFull); err == nil && leafInfo.IsDir() {
+								appendCandidate(leafFull, leafName, name+"/"+subName)
+								expanded = true
+							}
+						}
+					}
+				}
+				if !expanded {
+					appendCandidate(subFull, subName, name)
+				}
+			}
+		default:
+			appendCandidate(full, name, "")
+		}
 	}
+
+	for _, c := range candidates {
+		display := c.name
+		if nameCount[c.name] > 1 && c.parent != "" {
+			display = fmt.Sprintf("%s (%s)", c.name, c.parent)
+		}
+		addRoot(c.path, display, "ugos:shared")
+	}
+}
+
+func isUGOSVolumeContainer(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower == "usbs" || lower == "external" {
+		return true
+	}
+	if strings.HasPrefix(lower, "volume") && len(lower) > len("volume") {
+		for _, ch := range lower[len("volume"):] {
+			if ch < '0' || ch > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func isUGOSUserContainer(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	return lower == "home" || lower == "users"
 }
 
 // DiscoverQNAPSharesFrom 优先解析威联通 /etc/config/smb.conf 中的真实共享文件夹，

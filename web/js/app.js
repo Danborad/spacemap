@@ -495,6 +495,7 @@
         } else {
             const qnapM = clean.match(/^\/share\/(?:[^/]+_DATA\/)?([^/]+)(?:\/(.*))?$/);
             const fnosM = clean.match(/^\/vol\d+\/\d+\/([^/]+)(?:\/(.*))?$/);
+            const ugosSharedM = clean.match(/\/shared\/volume\d+\/([^/]+)(?:\/(.*))?$/);
             const ugosM = clean.match(/^\/volume\d+\/([^/]+)(?:\/(.*))?$/);
             if (qnapM) {
                 shareName = qnapM[1];
@@ -502,6 +503,9 @@
             } else if (fnosM) {
                 shareName = fnosM[1];
                 rel = fnosM[2] || '';
+            } else if (ugosSharedM) {
+                shareName = ugosSharedM[1];
+                rel = ugosSharedM[2] || '';
             } else if (ugosM) {
                 shareName = ugosM[1];
                 rel = ugosM[2] || '';
@@ -1409,7 +1413,7 @@
         if (state.eventSource) {
             state.eventSource.close();
         }
-        const es = new EventSource('/api/scan/events');
+        const es = new EventSource('./api/scan/events');
         state.eventSource = es;
         es.addEventListener('progress', ev => {
             try {
@@ -1536,11 +1540,11 @@
 
         document.getElementById('exportCsvBtn').onclick = () => {
             if (!state.currentScanId) return U.toast('请先执行扫描', 'info');
-            window.location.href = `/api/scans/${state.currentScanId}/export?format=csv`;
+            window.location.href = `./api/scans/${state.currentScanId}/export?format=csv`;
         };
         document.getElementById('exportJsonBtn').onclick = () => {
             if (!state.currentScanId) return U.toast('请先执行扫描', 'info');
-            window.location.href = `/api/scans/${state.currentScanId}/export?format=json`;
+            window.location.href = `./api/scans/${state.currentScanId}/export?format=json`;
         };
 
         // 树图 / 排行 & 面包屑

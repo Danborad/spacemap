@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -98,13 +99,22 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
 		if origin != "" {
 			u, err := url.Parse(origin)
-			forwardedHost := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
-			sameHost := err == nil && (u.Host == r.Host || (forwardedHost != "" && u.Host == forwardedHost))
-			viaUGOSGateway := err == nil && strings.TrimSpace(r.Header.Get("Ugreen-User-ID")) != ""
-			if !sameHost && !viaUGOSGateway {
+			validOrigin := err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+			sameHost := validOrigin && (u.Host == r.Host || headerMatchesHost(r.Header.Get("X-Forwarded-Host"), u.Host))
+			loopbackRemote := isLoopbackRemote(r.RemoteAddr)
+			viaUGOSGateway := validOrigin && ((s.cfg != nil && s.cfg.Platform == config.PlatformUGOS && loopbackRemote) || strings.TrimSpace(r.Header.Get("Ugreen-User-ID")) != "")
+			sameRefererProxy := false
+			if validOrigin && loopbackRemote {
+				if ref := strings.TrimSpace(r.Header.Get("Referer")); ref != "" {
+					if refURL, refErr := url.Parse(ref); refErr == nil && refURL.Host == u.Host {
+						sameRefererProxy = true
+					}
+				}
+			}
+			if !sameHost && !viaUGOSGateway && !sameRefererProxy {
 				writeJSONError(w, http.StatusForbidden, "跨域请求被拒绝")
 				return
 			}
@@ -120,6 +130,33 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func headerMatchesHost(rawHeader, targetHost string) bool {
+	if rawHeader == "" || targetHost == "" {
+		return false
+	}
+	for _, part := range strings.Split(rawHeader, ",") {
+		if strings.TrimSpace(part) == targetHost {
+			return true
+		}
+	}
+	return false
+}
+
+func isLoopbackRemote(remoteAddr string) bool {
+	host := strings.TrimSpace(remoteAddr)
+	if host == "" {
+		return false
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Server) savedPathStrings() []string {
