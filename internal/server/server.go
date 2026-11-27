@@ -82,11 +82,11 @@ func New(cfg *config.Config, database *db.DB, authMgr *auth.Manager, scanMgr *sc
 	mux.HandleFunc("POST /api/update/apply", s.handleUpdateApply)
 	mux.HandleFunc("POST /api/update/download-package", s.handleUpdateDownloadPackage)
 
-	// 内嵌静态资源服务
+	// 内嵌静态资源服务（为 HTML/JS/CSS 添加协商缓存头，防止客户端升级后沿用旧脚本）
 	staticSub, err := fs.Sub(web.Assets, ".")
 	if err == nil {
 		fileServer := http.FileServer(http.FS(staticSub))
-		mux.Handle("/", fileServer)
+		mux.Handle("/", staticCacheMiddleware(fileServer))
 	}
 
 	s.handler = s.corsMiddleware(authMgr.Middleware(mux))
@@ -96,6 +96,22 @@ func New(cfg *config.Config, database *db.DB, authMgr *auth.Manager, scanMgr *sc
 // Handler 返回可直接交给 http.Server 使用的根处理器。
 func (s *Server) Handler() http.Handler {
 	return s.handler
+}
+
+func staticCacheMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.ToLower(r.URL.Path)
+		switch {
+		case p == "/" || strings.HasSuffix(p, ".html"):
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			w.Header().Set("Pragma", "no-cache")
+		case strings.HasSuffix(p, "echarts.min.js"):
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+		case strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".css"):
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {

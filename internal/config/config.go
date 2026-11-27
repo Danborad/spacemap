@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-const DefaultVersion = "2.4.4"
+const DefaultVersion = "2.4.5"
 
 // PlatformType 标识当前运行环境类型。
 type PlatformType string
