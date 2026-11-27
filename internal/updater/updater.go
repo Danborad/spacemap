@@ -56,15 +56,18 @@ type UpdateStatus struct {
 	ReleaseURL     string `json:"releaseUrl"`
 	ReleaseNotes   string `json:"releaseNotes"`
 	PublishedAt    string `json:"publishedAt"`
-	DownloadURL    string `json:"downloadUrl"`
-	ChecksumURL    string `json:"checksumUrl"`
-	AssetName      string `json:"assetName"`
-	CheckedAt      int64  `json:"checkedAt"`
-	State          string `json:"state"` // idle | checking | available | up_to_date | downloading | verifying | restarting | error
-	ProgressPct    int    `json:"progressPct"`
-	Downloaded     int64  `json:"downloaded"`
-	TotalBytes     int64  `json:"totalBytes"`
-	Message        string `json:"message"`
+	DownloadURL           string `json:"downloadUrl"`
+	ChecksumURL           string `json:"checksumUrl"`
+	AssetName             string `json:"assetName"`
+	PackageAssetName      string `json:"packageAssetName"`
+	PackageDownloadURL    string `json:"packageDownloadUrl"`
+	DownloadedPackagePath string `json:"downloadedPackagePath"`
+	CheckedAt             int64  `json:"checkedAt"`
+	State                 string `json:"state"` // idle | checking | available | up_to_date | downloading | verifying | restarting | downloaded | error
+	ProgressPct           int    `json:"progressPct"`
+	Downloaded            int64  `json:"downloaded"`
+	TotalBytes            int64  `json:"totalBytes"`
+	Message               string `json:"message"`
 }
 
 // Manager 管理版本检查、SHA-256 与 ELF 校验及原子替换热重启。
@@ -120,6 +123,14 @@ func (m *Manager) targetArch() string {
 
 func (m *Manager) targetAssetName() string {
 	return "spacemap-linux-" + m.targetArch()
+}
+
+func (m *Manager) targetUGOSPackageName(version string) string {
+	clean := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(version), "v"), "V")
+	if clean == "" {
+		return ""
+	}
+	return fmt.Sprintf("SpaceMap_%s_%s.upk", clean, m.targetArch())
 }
 
 func (m *Manager) resolveRepoURL(repo string) string {
@@ -304,6 +315,9 @@ func (m *Manager) detectSelfUpdateCapability() (bool, string, string) {
 	dir := filepath.Dir(execPath)
 	probe, err := os.CreateTemp(dir, ".spacemap.probe.*")
 	if err != nil {
+		if m.cfg.Platform == config.PlatformUGOS {
+			return false, "绿联沙箱安装目录为只读，支持一键下载最新 .upk 到授权共享文件夹（含 SHA-256 校验），再于应用中心手动覆盖安装", execPath
+		}
 		return false, fmt.Sprintf("当前运行用户对目录 %s 无写入权限，请通过 NAS 应用中心手动覆盖安装", dir), execPath
 	}
 	probeName := probe.Name()
@@ -463,6 +477,9 @@ func (m *Manager) Check(ctx context.Context) (UpdateStatus, error) {
 		m.status.ReleaseNotes = ""
 		m.status.DownloadURL = ""
 		m.status.ChecksumURL = ""
+		m.status.PackageAssetName = ""
+		m.status.PackageDownloadURL = ""
+		m.status.DownloadedPackagePath = ""
 		m.status.CheckedAt = time.Now().UnixMilli()
 		m.status.State = "up_to_date"
 		m.status.Message = fmt.Sprintf("仓库 %s 暂未发布任何 Release（当前版本 v%s）", conf.Repo, m.cfg.Version)
@@ -487,15 +504,24 @@ func (m *Manager) Check(ctx context.Context) (UpdateStatus, error) {
 	}
 	latestClean := strings.TrimPrefix(strings.TrimPrefix(latestVer, "v"), "V")
 
-	var dlURL, sumURL string
-	var assetSize int64
+	var dlURL, sumURL, pkgName, pkgURL string
+	var assetSize, pkgSize int64
+	expectedPkg := strings.ToLower(m.targetUGOSPackageName(latestClean))
+	archUpkSuffix := "_" + strings.ToLower(m.targetArch()) + ".upk"
 	for _, a := range rel.Assets {
-		nameLower := strings.ToLower(strings.TrimSpace(a.Name))
+		nameTrim := strings.TrimSpace(a.Name)
+		nameLower := strings.ToLower(nameTrim)
 		if a.Name == expectedAsset || nameLower == expectedAsset {
 			dlURL = a.BrowserDownloadURL
 			assetSize = a.Size
 		} else if nameLower == "checksums.txt" || nameLower == "sha256sums.txt" {
 			sumURL = a.BrowserDownloadURL
+		} else if m.cfg.Platform == config.PlatformUGOS && strings.HasSuffix(nameLower, ".upk") {
+			if (expectedPkg != "" && nameLower == expectedPkg) || (pkgURL == "" && strings.HasSuffix(nameLower, archUpkSuffix)) {
+				pkgName = nameTrim
+				pkgURL = a.BrowserDownloadURL
+				pkgSize = a.Size
+			}
 		}
 	}
 
@@ -504,11 +530,18 @@ func (m *Manager) Check(ctx context.Context) (UpdateStatus, error) {
 	msg := fmt.Sprintf("当前已是最新版本 v%s", m.cfg.Version)
 	if hasUpdate {
 		state = "available"
-		if dlURL != "" {
+		if m.cfg.Platform == config.PlatformUGOS && !canUpdate && pkgURL != "" {
+			msg = fmt.Sprintf("发现新版本 v%s，支持一键下载 .upk 安装包到授权共享目录", latestClean)
+		} else if dlURL != "" {
 			msg = fmt.Sprintf("发现新版本 v%s，支持直接下载热更新", latestClean)
 		} else {
 			msg = fmt.Sprintf("发现新版本 v%s，但该发布暂未包含 %s 安装包", latestClean, expectedAsset)
 		}
+	}
+
+	displayTotal := assetSize
+	if m.cfg.Platform == config.PlatformUGOS && !canUpdate && pkgSize > 0 {
+		displayTotal = pkgSize
 	}
 
 	m.mu.Lock()
@@ -524,7 +557,12 @@ func (m *Manager) Check(ctx context.Context) (UpdateStatus, error) {
 	m.status.DownloadURL = dlURL
 	m.status.ChecksumURL = sumURL
 	m.status.AssetName = expectedAsset
-	m.status.TotalBytes = assetSize
+	m.status.PackageAssetName = pkgName
+	m.status.PackageDownloadURL = pkgURL
+	if hasUpdate && m.status.DownloadedPackagePath != "" && filepath.Base(m.status.DownloadedPackagePath) != pkgName {
+		m.status.DownloadedPackagePath = ""
+	}
+	m.status.TotalBytes = displayTotal
 	m.status.Downloaded = 0
 	m.status.ProgressPct = 0
 	m.status.CheckedAt = time.Now().UnixMilli()
@@ -598,24 +636,36 @@ func (m *Manager) fetchReleaseViaWebRedirect(ctx context.Context, repoSlug, prox
 					if tag == "" {
 						return nil, errNoReleasePublished
 					}
-					rel := &githubRelease{
-						TagName: tag,
-						HTMLURL: fmt.Sprintf("%s/%s/releases/tag/%s", webBase, repoSlug, tag),
-						Body:    "已通过 GitHub Releases 免限流跳转通道检测到最新版本",
-						Assets: []struct {
+					pkgAssetName := m.targetUGOSPackageName(tag)
+					assets := []struct {
+						Name               string `json:"name"`
+						BrowserDownloadURL string `json:"browser_download_url"`
+						Size               int64  `json:"size"`
+					}{
+						{
+							Name:               expectedAsset,
+							BrowserDownloadURL: fmt.Sprintf("%s/%s/releases/download/%s/%s", webBase, repoSlug, tag, expectedAsset),
+						},
+						{
+							Name:               "checksums.txt",
+							BrowserDownloadURL: fmt.Sprintf("%s/%s/releases/download/%s/checksums.txt", webBase, repoSlug, tag),
+						},
+					}
+					if pkgAssetName != "" {
+						assets = append(assets, struct {
 							Name               string `json:"name"`
 							BrowserDownloadURL string `json:"browser_download_url"`
 							Size               int64  `json:"size"`
 						}{
-							{
-								Name:               expectedAsset,
-								BrowserDownloadURL: fmt.Sprintf("%s/%s/releases/download/%s/%s", webBase, repoSlug, tag, expectedAsset),
-							},
-							{
-								Name:               "checksums.txt",
-								BrowserDownloadURL: fmt.Sprintf("%s/%s/releases/download/%s/checksums.txt", webBase, repoSlug, tag),
-							},
-						},
+							Name:               pkgAssetName,
+							BrowserDownloadURL: fmt.Sprintf("%s/%s/releases/download/%s/%s", webBase, repoSlug, tag, pkgAssetName),
+						})
+					}
+					rel := &githubRelease{
+						TagName: tag,
+						HTMLURL: fmt.Sprintf("%s/%s/releases/tag/%s", webBase, repoSlug, tag),
+						Body:    "已通过 GitHub Releases 免限流跳转通道检测到最新版本",
+						Assets:  assets,
 					}
 					return rel, nil
 				}
@@ -845,6 +895,152 @@ func (m *Manager) applyInternal(ctx context.Context, needCheck bool) error {
 		m.onRestart(selfPath)
 	}
 	return nil
+}
+
+// StartDownloadPackage 异步下载当前平台套件包（如绿联 .upk）到指定已授权可写目录并校验 SHA-256。
+func (m *Manager) StartDownloadPackage(targetDir string) error {
+	targetDir = strings.TrimSpace(targetDir)
+	info, err := os.Stat(targetDir)
+	if err != nil || !info.IsDir() {
+		return errors.New("目标保存路径不存在或不是目录")
+	}
+	if !config.IsPathWritable(targetDir) {
+		return errors.New("目标目录没有写入权限，请在绿联应用配置中设为读写权限")
+	}
+
+	m.mu.Lock()
+	if m.status.State == "downloading" || m.status.State == "verifying" || m.status.State == "restarting" {
+		m.mu.Unlock()
+		return errors.New("正在下载或更新中，请勿重复触发")
+	}
+	needCheck := m.status.CheckedAt == 0 || m.status.PackageDownloadURL == ""
+	if !needCheck && !m.status.HasUpdate {
+		m.mu.Unlock()
+		return errors.New("当前已是最新版本，无需下载安装包")
+	}
+	m.status.State = "downloading"
+	m.status.ProgressPct = 0
+	m.status.Downloaded = 0
+	m.status.DownloadedPackagePath = ""
+	m.status.Message = "正在准备下载 .upk 安装包..."
+	m.mu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if _, err := m.downloadPackageInternal(ctx, targetDir, needCheck); err != nil {
+			log.Printf("下载 .upk 安装包失败: %v", err)
+			m.mu.Lock()
+			m.status.State = "error"
+			m.status.Message = err.Error()
+			m.mu.Unlock()
+		}
+	}()
+	return nil
+}
+
+// DownloadPackageSync 同步下载套件包到目标目录并校验 SHA-256（主要用于单元测试）。
+func (m *Manager) DownloadPackageSync(ctx context.Context, targetDir string) (string, error) {
+	targetDir = strings.TrimSpace(targetDir)
+	info, err := os.Stat(targetDir)
+	if err != nil || !info.IsDir() {
+		return "", errors.New("目标保存路径不存在或不是目录")
+	}
+	if !config.IsPathWritable(targetDir) {
+		return "", errors.New("目标目录没有写入权限")
+	}
+	m.mu.Lock()
+	needCheck := m.status.CheckedAt == 0 || m.status.PackageDownloadURL == ""
+	m.mu.Unlock()
+
+	finalPath, err := m.downloadPackageInternal(ctx, targetDir, needCheck)
+	if err != nil {
+		m.mu.Lock()
+		m.status.State = "error"
+		m.status.Message = err.Error()
+		m.mu.Unlock()
+		return "", err
+	}
+	return finalPath, nil
+}
+
+func (m *Manager) downloadPackageInternal(ctx context.Context, targetDir string, needCheck bool) (string, error) {
+	if needCheck {
+		m.mu.Lock()
+		m.status.State = "idle"
+		m.mu.Unlock()
+		if _, err := m.Check(ctx); err != nil {
+			return "", err
+		}
+	}
+
+	m.mu.Lock()
+	st := m.status
+	conf := m.conf
+	checksumOptional := m.checksumMayMiss
+	if !st.HasUpdate {
+		m.mu.Unlock()
+		return "", errors.New("当前已是最新版本，无需下载安装包")
+	}
+	if st.PackageDownloadURL == "" || st.PackageAssetName == "" {
+		m.mu.Unlock()
+		return "", fmt.Errorf("当前发布暂未包含适用于 %s 架构的 .upk 安装包", st.Arch)
+	}
+	m.status.State = "downloading"
+	m.status.ProgressPct = 0
+	m.status.Downloaded = 0
+	m.status.DownloadedPackagePath = ""
+	m.status.Message = fmt.Sprintf("正在下载 %s...", st.PackageAssetName)
+	m.mu.Unlock()
+
+	expectedHash := ""
+	if st.ChecksumURL != "" {
+		sum, err := m.fetchExpectedSHA256(ctx, st.ChecksumURL, conf.ProxyPrefix, st.PackageAssetName)
+		if err != nil {
+			if !(checksumOptional && errors.Is(err, errNoReleasePublished)) {
+				return "", fmt.Errorf("获取 SHA-256 校验清单失败: %w", err)
+			}
+			log.Printf("未在当前 Release 中找到 checksums.txt（404），跳过校验")
+		} else {
+			expectedHash = sum
+		}
+	}
+
+	tmpPath := filepath.Join(targetDir, "."+st.PackageAssetName+".tmp")
+	finalPath := filepath.Join(targetDir, filepath.Base(st.PackageAssetName))
+	_ = os.Remove(tmpPath)
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+
+	gotHash, err := m.downloadWithProgress(ctx, st.PackageDownloadURL, conf.ProxyPrefix, tmpPath, st.TotalBytes)
+	if err != nil {
+		return "", fmt.Errorf("下载 .upk 安装包失败: %w", err)
+	}
+
+	m.mu.Lock()
+	m.status.State = "verifying"
+	m.status.ProgressPct = 100
+	m.status.Message = "正在校验 .upk 安装包 SHA-256..."
+	m.mu.Unlock()
+
+	if expectedHash != "" && !strings.EqualFold(gotHash, expectedHash) {
+		return "", fmt.Errorf("SHA-256 校验不匹配（期望 %s，实际 %s），已中止保存", expectedHash, gotHash)
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		return "", fmt.Errorf("设置安装包权限失败: %w", err)
+	}
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		return "", fmt.Errorf("保存安装包到共享目录失败: %w", err)
+	}
+
+	m.mu.Lock()
+	m.status.State = "downloaded"
+	m.status.ProgressPct = 100
+	m.status.DownloadedPackagePath = finalPath
+	m.status.Message = fmt.Sprintf("安装包已下载并校验完成：%s", finalPath)
+	m.mu.Unlock()
+	return finalPath, nil
 }
 
 func (m *Manager) fetchExpectedSHA256(ctx context.Context, checksumURL, proxyPrefix, assetName string) (string, error) {

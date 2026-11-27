@@ -39,7 +39,7 @@
                 </div>
                 <div class="brand-copy">
                     <span class="brand-name">SpaceMap</span>
-                    <span id="appVersionBadge" class="version-pill">v2.4.3</span>
+                    <span id="appVersionBadge" class="version-pill">v2.4.4</span>
                 </div>
             </div>
 
@@ -206,6 +206,7 @@
                                 <div id="inspectorTitle" class="inspector-path">-</div>
                             </div>
                             <div class="inspector-head-actions">
+                                <button id="inspectorOpenFileMgrBtn" class="btn btn-secondary btn-sm hidden" title="在绿联文件管理中打开此目录">打开目录</button>
                                 <button id="inspectorCopySmbBtn" class="btn btn-secondary btn-sm hidden" title="复制该目录的 SMB 网络路径">复制 SMB</button>
                                 <span id="inspectorSize" class="inspector-size-badge">0 B</span>
                             </div>
@@ -535,9 +536,16 @@
                                 <div id="updateProgressText" class="table-meta" style="margin-top:6px;">准备中...</div>
                             </div>
 
+                            <div id="ugosDownloadDirWrap" class="form-field hidden" style="margin-top:12px;">
+                                <label for="ugosDownloadDirSelect">安装包保存目录（已授权读写共享文件夹）</label>
+                                <select id="ugosDownloadDirSelect" class="select-input"></select>
+                            </div>
+
                             <div class="form-actions" style="margin-top:12px;">
                                 <button type="button" id="checkUpdateBtn" class="btn btn-secondary">检查更新</button>
                                 <button type="button" id="applyUpdateBtn" class="btn btn-gradient hidden">一键更新并重启</button>
+                                <button type="button" id="openDownloadedDirBtn" class="btn btn-secondary hidden">在文件管理中查看</button>
+                                <button type="button" id="openAppCenterBtn" class="btn btn-secondary hidden">打开应用中心</button>
                                 <a id="releaseLinkBtn" class="btn btn-ghost hidden" target="_blank" rel="noopener noreferrer">查看发布页</a>
                             </div>
 
@@ -633,6 +641,7 @@
     <!-- Toast 消息容器 -->
     <div id="toastContainer" class="toast-container"></div>
 
+    <script type="module" src="./js/ugos-bridge.js"></script>
     <script src="./js/utils.js"></script>
     <script src="./js/api.js"></script>
     <script src="./js/charts.js"></script>

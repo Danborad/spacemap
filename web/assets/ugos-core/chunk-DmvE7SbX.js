@@ -1,0 +1,1 @@
+function e(e){e=e||32;let t=``;for(let n=0;n<e;n++)t+=`ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678`.charAt(Math.floor(Math.random()*48));return t}export{e as t};

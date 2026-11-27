@@ -112,6 +112,10 @@ window.SpaceAPI = (function() {
             body: JSON.stringify(cfg)
         }),
         checkUpdate: () => request('/api/update/check', { method: 'POST', body: '{}' }),
-        applyUpdate: () => request('/api/update/apply', { method: 'POST', body: '{}' })
+        applyUpdate: () => request('/api/update/apply', { method: 'POST', body: '{}' }),
+        downloadUpdatePackage: (targetDir = '') => request('/api/update/download-package', {
+            method: 'POST',
+            body: JSON.stringify({ targetDir })
+        })
     };
 })();

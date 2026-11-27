@@ -275,3 +275,120 @@ func TestFallbackToWebRedirectOnRateLimit(t *testing.T) {
 		t.Fatalf("expected repoUrl and releaseUrl populated, got repo=%q release=%q", st2.RepoURL, st2.ReleaseURL)
 	}
 }
+
+func TestUGOSDownloadPackageWithSHA256(t *testing.T) {
+	tmp := t.TempDir()
+	dataDir := filepath.Join(tmp, "ug_data")
+	binDir := filepath.Join(tmp, "ro_bin")
+	shareDir := filepath.Join(tmp, "share1")
+	for _, d := range []string{dataDir, binDir, shareDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	execPath := filepath.Join(binDir, "spacemap")
+	if err := os.WriteFile(execPath, makeFakeELF("amd64", "OLD"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(binDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(binDir, 0o755) })
+
+	pkgBytes := []byte("FAKE-UPK-PACKAGE-PAYLOAD-9.9.9")
+	goodHash := sha256Hex(pkgBytes)
+	pkgName := "SpaceMap_9.9.9_amd64.upk"
+
+	var badHash atomic.Bool
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/manifest.json":
+			rel := map[string]any{
+				"tag_name": "v9.9.9",
+				"html_url": srv.URL + "/releases/v9.9.9",
+				"assets": []map[string]any{
+					{
+						"name":                 pkgName,
+						"browser_download_url": srv.URL + "/download/" + pkgName,
+						"size":                 len(pkgBytes),
+					},
+					{
+						"name":                 "checksums.txt",
+						"browser_download_url": srv.URL + "/download/checksums.txt",
+						"size":                 96,
+					},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(rel)
+		case "/download/checksums.txt":
+			h := goodHash
+			if badHash.Load() {
+				h = strings.Repeat("f", 64)
+			}
+			_, _ = fmt.Fprintf(w, "%s  %s\n", h, pkgName)
+		case "/download/" + pkgName:
+			_, _ = w.Write(pkgBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	database, err := db.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	cfg := &config.Config{
+		DataDir:  dataDir,
+		Platform: config.PlatformUGOS,
+		Version:  "2.4.3",
+	}
+	mgr := New(cfg, database, nil, nil)
+	mgr.execPathOverride = execPath
+	mgr.archOverride = "amd64"
+	if _, err := mgr.SaveConfig(UpdateConfig{Repo: srv.URL + "/manifest.json"}); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := mgr.Check(context.Background())
+	if err != nil {
+		t.Fatalf("Check failed: %v", err)
+	}
+	if !st.HasUpdate || st.PackageAssetName != pkgName || st.PackageDownloadURL == "" {
+		t.Fatalf("expected packageDownloadUrl populated, got: %+v", st)
+	}
+
+	// 1. 哈希错误时应拦截并清理临时文件，且不生成最终 .upk
+	badHash.Store(true)
+	if _, err := mgr.DownloadPackageSync(context.Background(), shareDir); err == nil || !strings.Contains(err.Error(), "SHA-256") {
+		t.Fatalf("expected SHA-256 mismatch error, got: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(shareDir, pkgName)); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no final upk on hash mismatch")
+	}
+	if _, tmpErr := os.Stat(filepath.Join(shareDir, "."+pkgName+".tmp")); !os.IsNotExist(tmpErr) {
+		t.Fatalf("expected temp file cleaned up on hash mismatch")
+	}
+	badHash.Store(false)
+
+	// 2. 合法下载并校验落盘
+	outPath, err := mgr.DownloadPackageSync(context.Background(), shareDir)
+	if err != nil {
+		t.Fatalf("DownloadPackageSync failed: %v", err)
+	}
+	expectedPath := filepath.Join(shareDir, pkgName)
+	if outPath != expectedPath {
+		t.Fatalf("expected %s, got %s", expectedPath, outPath)
+	}
+	savedBytes, err := os.ReadFile(expectedPath)
+	if err != nil || string(savedBytes) != string(pkgBytes) {
+		t.Fatalf("saved upk payload mismatch: err=%v", err)
+	}
+	finalSt := mgr.GetStatus()
+	if finalSt.State != "downloaded" || finalSt.DownloadedPackagePath != expectedPath {
+		t.Fatalf("unexpected final status: %+v", finalSt)
+	}
+}

@@ -75,11 +75,12 @@ func New(cfg *config.Config, database *db.DB, authMgr *auth.Manager, scanMgr *sc
 	mux.HandleFunc("GET /api/file/details", s.handleFileDetails)
 	mux.HandleFunc("POST /api/files/delete", s.handleDeleteFiles)
 
-	// 在线检查更新与热重启升级
+	// 在线检查更新、下载套件包与热重启升级
 	mux.HandleFunc("GET /api/update/status", s.handleUpdateStatus)
 	mux.HandleFunc("POST /api/update/config", s.handleUpdateConfig)
 	mux.HandleFunc("POST /api/update/check", s.handleUpdateCheck)
 	mux.HandleFunc("POST /api/update/apply", s.handleUpdateApply)
+	mux.HandleFunc("POST /api/update/download-package", s.handleUpdateDownloadPackage)
 
 	// 内嵌静态资源服务
 	staticSub, err := fs.Sub(web.Assets, ".")

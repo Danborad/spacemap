@@ -1,0 +1,1 @@
+import{t as e}from"./chunk-CCIs2arm.js";var t=Object.defineProperty,n=((e,n)=>{let r={};for(var i in e)t(r,i,{get:e[i],enumerable:!0});return n||t(r,Symbol.toStringTag,{value:`Module`}),r})({default:()=>r}),r=e.getInstance();export{n,r as t};

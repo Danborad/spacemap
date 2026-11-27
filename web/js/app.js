@@ -541,9 +541,40 @@
         }
     }
 
+    async function openInUGOSFileManager(absPath) {
+        if (!absPath) return;
+        const bridge = window.UGOSBridge;
+        if (bridge && typeof bridge.openFileManager === 'function') {
+            const opened = await bridge.openFileManager(absPath);
+            if (opened) {
+                U.toast('已在绿联文件管理中打开目录', 'ok');
+                return;
+            }
+        }
+        const smb = buildSmbPaths(absPath);
+        if (smb) {
+            const ok = await U.copyText(smb.preferred);
+            U.toast(ok ? `无法直接唤起桌面文件管理，已复制 SMB 路径：${smb.preferred}` : '请在绿联桌面客户端或网页内嵌窗口中打开，或手动复制 SMB 路径访问', 'info');
+        } else {
+            U.toast('请在绿联桌面客户端或网页内嵌窗口中使用此功能', 'info');
+        }
+    }
+
     function renderInspectorPanel(targetPath, targetSize, folders, files, canDrill) {
         document.getElementById('inspectorTitle').textContent = targetPath || '-';
         document.getElementById('inspectorSize').textContent = U.formatBytes(targetSize || 0);
+
+        const isUGOS = state.rootsData && state.rootsData.platform === 'ugos';
+        const openFmBtn = document.getElementById('inspectorOpenFileMgrBtn');
+        if (openFmBtn) {
+            if (isUGOS && targetPath) {
+                openFmBtn.classList.remove('hidden');
+                openFmBtn.onclick = () => openInUGOSFileManager(targetPath);
+            } else {
+                openFmBtn.classList.add('hidden');
+                openFmBtn.onclick = null;
+            }
+        }
 
         const copySmbBtn = document.getElementById('inspectorCopySmbBtn');
         if (targetPath && buildSmbPaths(targetPath)) {
@@ -1155,6 +1186,10 @@
         const applyBtn = document.getElementById('applyUpdateBtn');
         const checkBtn = document.getElementById('checkUpdateBtn');
         const linkBtn = document.getElementById('releaseLinkBtn');
+        const ugosDirWrap = document.getElementById('ugosDownloadDirWrap');
+        const ugosDirSelect = document.getElementById('ugosDownloadDirSelect');
+        const openDownloadedDirBtn = document.getElementById('openDownloadedDirBtn');
+        const openAppCenterBtn = document.getElementById('openAppCenterBtn');
 
         if (!badge) return;
 
@@ -1189,6 +1224,7 @@
             downloading: ['下载中', 'badge-warn'],
             verifying: ['校验中', 'badge-warn'],
             restarting: ['重启中', 'badge-warn'],
+            downloaded: ['安装包已就绪', 'badge-ok'],
             error: ['检查/更新异常', 'badge-danger']
         };
         const [stText, stCls] = stateLabels[st.state] || [st.state || '未知', 'badge-neutral'];
@@ -1227,18 +1263,90 @@
             progWrap.classList.add('hidden');
         }
 
-        const canApply = !!(st.hasUpdate && st.canSelfUpdate && st.downloadUrl);
-        applyBtn.classList.toggle('hidden', !st.hasUpdate);
-        applyBtn.disabled = inProgress || !canApply;
-        if (!st.canSelfUpdate && st.hasUpdate) {
-            applyBtn.title = st.selfUpdateTip || '当前环境不支持直接替换二进制';
-            applyBtn.textContent = st.platform === 'docker' ? '请更新 Docker 镜像' : '请手动覆盖安装';
-        } else if (!st.downloadUrl && st.hasUpdate) {
-            applyBtn.title = `未找到 ${st.assetName || ''} 资产`;
-            applyBtn.textContent = '暂无匹配安装包';
+        const isUGOSPackageMode = (st.platform === 'ugos' && !st.canSelfUpdate && !!st.hasUpdate && !!st.packageDownloadUrl);
+        const writableRoots = ((state.rootsData && state.rootsData.authorized) || []).filter(r => r && r.writable);
+
+        if (ugosDirWrap && ugosDirSelect) {
+            if (isUGOSPackageMode) {
+                ugosDirWrap.classList.remove('hidden');
+                const prevVal = ugosDirSelect.value;
+                if (writableRoots.length) {
+                    ugosDirSelect.innerHTML = writableRoots.map(r =>
+                        `<option value="${U.escapeHtml(r.path)}">${U.escapeHtml(r.name)} (${U.escapeHtml(r.path)})</option>`
+                    ).join('');
+                    if (prevVal && writableRoots.some(r => r.path === prevVal)) {
+                        ugosDirSelect.value = prevVal;
+                    } else if (state.selectedRootPath && writableRoots.some(r => r.path === state.selectedRootPath)) {
+                        ugosDirSelect.value = state.selectedRootPath;
+                    }
+                    ugosDirSelect.disabled = inProgress;
+                } else {
+                    ugosDirSelect.innerHTML = '<option value="">暂无可写入的已授权共享目录</option>';
+                    ugosDirSelect.disabled = true;
+                }
+            } else {
+                ugosDirWrap.classList.add('hidden');
+            }
+        }
+
+        if (isUGOSPackageMode) {
+            const canDownloadPkg = writableRoots.length > 0;
+            applyBtn.classList.remove('hidden');
+            applyBtn.disabled = inProgress || !canDownloadPkg;
+            if (!canDownloadPkg) {
+                applyBtn.title = '请先在绿联应用配置中为至少一个文件夹授予读写权限';
+                applyBtn.textContent = '无读写目录（无法保存）';
+            } else if (inProgress) {
+                applyBtn.title = '';
+                applyBtn.textContent = '正在下载 .upk...';
+            } else if (st.state === 'downloaded') {
+                applyBtn.title = '';
+                applyBtn.textContent = '重新下载 .upk';
+            } else {
+                applyBtn.title = '';
+                applyBtn.textContent = `下载 v${st.latestVersion || ''} 安装包 (.upk)`;
+            }
         } else {
-            applyBtn.title = '';
-            applyBtn.textContent = inProgress ? '正在更新...' : `一键更新至 v${st.latestVersion || ''}`;
+            const canApply = !!(st.hasUpdate && st.canSelfUpdate && st.downloadUrl);
+            applyBtn.classList.toggle('hidden', !st.hasUpdate);
+            applyBtn.disabled = inProgress || !canApply;
+            if (!st.canSelfUpdate && st.hasUpdate) {
+                applyBtn.title = st.selfUpdateTip || '当前环境不支持直接替换二进制';
+                applyBtn.textContent = st.platform === 'docker' ? '请更新 Docker 镜像' : '请手动覆盖安装';
+            } else if (!st.downloadUrl && st.hasUpdate) {
+                applyBtn.title = `未找到 ${st.assetName || ''} 资产`;
+                applyBtn.textContent = '暂无匹配安装包';
+            } else {
+                applyBtn.title = '';
+                applyBtn.textContent = inProgress ? '正在更新...' : `一键更新至 v${st.latestVersion || ''}`;
+            }
+        }
+
+        if (st.platform === 'ugos' && st.state === 'downloaded' && st.downloadedPackagePath) {
+            tipEl.textContent = `已保存至 ${st.downloadedPackagePath}（SHA-256 校验通过），请在绿联「应用中心 → 手动安装 → 从 NAS 选择」覆盖安装。`;
+            if (openDownloadedDirBtn) {
+                openDownloadedDirBtn.classList.remove('hidden');
+                openDownloadedDirBtn.onclick = () => openInUGOSFileManager(parentDirPath(st.downloadedPackagePath));
+            }
+            if (openAppCenterBtn) {
+                openAppCenterBtn.classList.remove('hidden');
+                openAppCenterBtn.onclick = async () => {
+                    const bridge = window.UGOSBridge;
+                    if (bridge && typeof bridge.openAppCenter === 'function' && await bridge.openAppCenter()) {
+                        return;
+                    }
+                    U.toast('请在绿联桌面打开「应用中心 → 手动安装 → 从 NAS 选择」安装刚下载的 .upk', 'info');
+                };
+            }
+        } else {
+            if (openDownloadedDirBtn) {
+                openDownloadedDirBtn.classList.add('hidden');
+                openDownloadedDirBtn.onclick = null;
+            }
+            if (openAppCenterBtn) {
+                openAppCenterBtn.classList.add('hidden');
+                openAppCenterBtn.onclick = null;
+            }
         }
     }
 
@@ -1267,6 +1375,18 @@
     async function triggerApplyUpdate() {
         const curRes = await loadUpdateStatus(false).catch(() => null);
         const st = curRes && curRes.status ? curRes.status : {};
+        if (st.platform === 'ugos' && !st.canSelfUpdate && st.packageDownloadUrl) {
+            const targetDir = document.getElementById('ugosDownloadDirSelect')?.value || '';
+            try {
+                const res = await API.downloadUpdatePackage(targetDir);
+                renderUpdatePanel({ config: curRes?.config, status: res.status }, false);
+                startUGOSPackageDownloadPolling();
+            } catch (err) {
+                U.toast('启动下载失败: ' + err.message, 'error');
+            }
+            return;
+        }
+
         const ok = await U.confirmDialog({
             title: `升级到 SpaceMap v${st.latestVersion || ''}`,
             desc: '将下载对应架构二进制并校验 SHA-256，校验通过后自动热重启服务（约 2~5 秒，原存储空间权限与扫描数据完整保留）。确定立即更新吗？',
@@ -1281,6 +1401,34 @@
         } catch (err) {
             U.toast('启动更新失败: ' + err.message, 'error');
         }
+    }
+
+    function startUGOSPackageDownloadPolling() {
+        if (updatePollTimer) clearInterval(updatePollTimer);
+        let rounds = 0;
+        updatePollTimer = setInterval(async () => {
+            rounds++;
+            if (rounds > 400) {
+                clearInterval(updatePollTimer);
+                updatePollTimer = null;
+                U.toast('下载状态轮询超时，请稍后重新检查', 'error');
+                return;
+            }
+            try {
+                const res = await API.getUpdateStatus();
+                renderUpdatePanel(res, false);
+                const st = res.status || {};
+                if (st.state === 'downloaded') {
+                    clearInterval(updatePollTimer);
+                    updatePollTimer = null;
+                    U.toast(`安装包已就绪：${st.downloadedPackagePath || st.packageAssetName}`, 'ok');
+                } else if (st.state === 'error') {
+                    clearInterval(updatePollTimer);
+                    updatePollTimer = null;
+                    U.toast('下载失败: ' + (st.message || '未知错误'), 'error');
+                }
+            } catch (_) {}
+        }, 500);
     }
 
     function startUpdateProgressPolling(targetVer) {
@@ -1340,10 +1488,11 @@
             const dirPath = parentDirPath(d.path);
             const dirSmb = buildSmbPaths(dirPath);
             const fileSmb = buildSmbPaths(d.path);
+            const isUGOS = state.rootsData && state.rootsData.platform === 'ugos';
             const body = document.getElementById('detailModalBody');
             body.innerHTML = `
                 <div class="detail-row"><div class="detail-label">文件名</div><div class="detail-val"><strong>${U.escapeHtml(d.name)}</strong></div></div>
-                <div class="detail-row"><div class="detail-label">完整路径</div><div class="detail-val">${U.escapeHtml(d.path)} <button class="btn btn-ghost btn-sm" data-copy-val="${U.escapeHtml(d.path)}">复制</button></div></div>
+                <div class="detail-row"><div class="detail-label">完整路径</div><div class="detail-val">${U.escapeHtml(d.path)} <button class="btn btn-ghost btn-sm" data-copy-val="${U.escapeHtml(d.path)}">复制</button>${isUGOS && dirPath ? ' <button class="btn btn-ghost btn-sm" id="detailOpenFileMgrBtn">打开所在目录</button>' : ''}</div></div>
                 ${dirSmb ? `<div class="detail-row"><div class="detail-label">目录 SMB</div><div class="detail-val">${U.escapeHtml(dirSmb.preferred)} <button class="btn btn-ghost btn-sm" data-copy-val="${U.escapeHtml(dirSmb.preferred)}">复制文件夹</button></div></div>` : ''}
                 ${fileSmb ? `<div class="detail-row"><div class="detail-label">Win SMB</div><div class="detail-val">${U.escapeHtml(fileSmb.win)} <button class="btn btn-ghost btn-sm" data-copy-val="${U.escapeHtml(fileSmb.win)}">复制</button></div></div>` : ''}
                 ${fileSmb ? `<div class="detail-row"><div class="detail-label">Mac SMB</div><div class="detail-val">${U.escapeHtml(fileSmb.mac)} <button class="btn btn-ghost btn-sm" data-copy-val="${U.escapeHtml(fileSmb.mac)}">复制</button></div></div>` : ''}
@@ -1360,6 +1509,10 @@
                     U.toast(ok ? `已复制：${val}` : `复制失败：${val}`, ok ? 'ok' : 'error');
                 };
             });
+            const detailOpenBtn = document.getElementById('detailOpenFileMgrBtn');
+            if (detailOpenBtn && dirPath) {
+                detailOpenBtn.onclick = () => openInUGOSFileManager(dirPath);
+            }
             document.getElementById('detailModal').classList.remove('hidden');
         } catch (err) {
             U.toast('获取详情失败: ' + err.message, 'error');
