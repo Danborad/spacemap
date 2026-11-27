@@ -2,13 +2,14 @@ package config
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-const DefaultVersion = "2.4.0"
+const DefaultVersion = "2.4.1"
 
 // PlatformType 标识当前运行环境类型。
 type PlatformType string
@@ -40,9 +41,15 @@ type Config struct {
 
 // Load 从环境变量加载运行配置并自动探测当前平台。
 func Load() *Config {
-	port := strings.TrimSpace(os.Getenv("PORT"))
+	port := firstNonEmptyEnv("PORT", "APP_HTTP_PORT", "UGAPP_PORT_HTTP")
 	if port == "" {
 		port = "7080"
+	}
+
+	if strings.TrimSpace(os.Getenv("TMPDIR")) == "" {
+		if cacheDir := strings.TrimSpace(os.Getenv("UGAPP_CACHE_DIR")); cacheDir != "" {
+			_ = os.Setenv("TMPDIR", cacheDir)
+		}
 	}
 
 	dataDir := strings.TrimSpace(os.Getenv("DATA_DIR"))
@@ -173,7 +180,14 @@ func (c *Config) DiscoverRoots() []RootEntry {
 		}
 	}
 	for _, envKey := range []string{"TRIM_DATA_SHARE_PATHS", "SCAN_PATHS"} {
-		for _, item := range splitColonPaths(c.runtimeEnv(envKey)) {
+		raw := c.runtimeEnv(envKey)
+		var items []string
+		if envKey == "SCAN_PATHS" {
+			items = splitEnvPaths(raw)
+		} else {
+			items = splitColonPaths(raw)
+		}
+		for _, item := range items {
 			addRoot(item, "env:"+envKey)
 		}
 	}
@@ -556,6 +570,48 @@ func isMountReadOnly(target string) bool {
 		}
 	}
 	return bestRO
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// splitEnvPaths 兼容 JSON 字符串数组、整段单路径（即使含逗号或分号）以及换行/分号/冒号/逗号分隔的多路径。
+func splitEnvPaths(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if strings.HasPrefix(raw, "[") {
+		var arr []string
+		if err := json.Unmarshal([]byte(raw), &arr); err == nil {
+			out := make([]string, 0, len(arr))
+			for _, item := range arr {
+				if p := strings.TrimSpace(item); p != "" {
+					out = append(out, p)
+				}
+			}
+			return out
+		}
+	}
+	if info, err := os.Stat(raw); err == nil && info.IsDir() {
+		return []string{raw}
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == '\n' || r == '\r' || r == ';' || r == ':' || r == ','
+	})
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func splitColonPaths(raw string) []string {

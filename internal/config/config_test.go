@@ -159,3 +159,62 @@ func TestDiscoverUGOSSharedDirs(t *testing.T) {
 		t.Fatalf("unexpected UGOS roots: %+v", roots)
 	}
 }
+
+func TestUGOSDynamicPortAndScanPaths(t *testing.T) {
+	tmp := t.TempDir()
+	dataDir := filepath.Join(tmp, "ug_data")
+	sharedDir := filepath.Join(tmp, "ug_shared")
+	cacheDir := filepath.Join(tmp, "ug_cache")
+	dirA := filepath.Join(tmp, "volume1", "Video")
+	dirB := filepath.Join(tmp, "volume1", "Photo")
+	dirC := filepath.Join(tmp, "volume2", "Backup")
+	for _, d := range []string{dataDir, sharedDir, cacheDir, dirA, dirB, dirC} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(dirA, filepath.Join(sharedDir, "Video")); err != nil {
+		t.Fatal(err)
+	}
+
+	// 验证动态端口变量回退链 PORT -> APP_HTTP_PORT -> UGAPP_PORT_HTTP 及 UGAPP_CACHE_DIR -> TMPDIR
+	t.Setenv("PORT", "")
+	t.Setenv("APP_HTTP_PORT", "")
+	t.Setenv("UGAPP_PORT_HTTP", "31080")
+	t.Setenv("TMPDIR", "")
+	t.Setenv("UGAPP_CACHE_DIR", cacheDir)
+	t.Setenv("UGAPP_DATA_DIR", dataDir)
+	t.Setenv("UGAPP_SHARED_DIR", sharedDir)
+
+	cfg := config.Load()
+	if cfg.Port != "31080" {
+		t.Fatalf("expected UGAPP_PORT_HTTP 31080, got %s", cfg.Port)
+	}
+	if gotTmp := os.Getenv("TMPDIR"); gotTmp != cacheDir {
+		t.Fatalf("expected TMPDIR=%s, got %s", cacheDir, gotTmp)
+	}
+
+	t.Setenv("APP_HTTP_PORT", "32080")
+	if cfg2 := config.Load(); cfg2.Port != "32080" {
+		t.Fatalf("expected APP_HTTP_PORT 32080 to override UGAPP_PORT_HTTP, got %s", cfg2.Port)
+	}
+
+	t.Setenv("PORT", "33080")
+	if cfg3 := config.Load(); cfg3.Port != "33080" {
+		t.Fatalf("expected PORT 33080 to take highest priority, got %s", cfg3.Port)
+	}
+
+	// JSON 数组格式 + 与 UGAPP_SHARED_DIR 去重合并
+	t.Setenv("SCAN_PATHS", `["`+dirA+`","`+dirB+`"]`)
+	rootsJSON := cfg.DiscoverRoots()
+	if len(rootsJSON) != 2 {
+		t.Fatalf("expected 2 merged roots (deduped), got %d (%+v)", len(rootsJSON), rootsJSON)
+	}
+
+	// 逗号与冒号分隔格式
+	t.Setenv("SCAN_PATHS", dirB+","+dirC+":"+dirA)
+	rootsDelim := cfg.DiscoverRoots()
+	if len(rootsDelim) != 3 {
+		t.Fatalf("expected 3 merged roots with delimiter parsing, got %d (%+v)", len(rootsDelim), rootsDelim)
+	}
+}

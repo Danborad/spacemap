@@ -249,7 +249,7 @@
             if (platform === 'fnos') {
                 tip = '尚未检测到授权目录，请打开飞牛「应用中心 → SpaceMap 存储分析 → 应用设置 → 访问权限」添加允许访问的文件夹，保存后刷新即可。';
             } else if (platform === 'ugos') {
-                tip = '尚未检测到授权目录，请打开绿联「应用中心 → SpaceMap → 应用设置 → 允许访问的文件夹」添加共享目录，保存后刷新即可。';
+                tip = '尚未检测到扫描目录，请在绿联「应用中心 → SpaceMap 存储分析 → 应用设置（或应用配置）」中点击添加「扫描文件夹」或授权可访问文件夹，保存并重启应用后刷新即可。';
             }
             toggleEmptyState(true, tip);
             updatePageHeader();
@@ -1003,7 +1003,7 @@
         } else if (data.platform === 'qnap') {
             tipEl.textContent = '威联通 QNAP：已自动识别 /share 下的共享文件夹，无需繁琐路径映射。';
         } else if (data.platform === 'ugos') {
-            tipEl.textContent = '绿联 UGOS Pro：请在「应用中心 → SpaceMap → 应用设置」中勾选允许访问的共享文件夹（保存后实时生效，无需重启）。';
+            tipEl.textContent = '绿联 UGOS Pro：请在「应用中心 → SpaceMap 存储分析 → 应用设置」中添加「扫描文件夹」或勾选允许访问的文件夹（保存后按提示重启应用生效）。';
         } else {
             tipEl.textContent = `当前环境 (${data.platformLabel})：支持自动发现与手动追加合法目录路径。`;
         }
@@ -1011,6 +1011,7 @@
         const sourceLabel = (src) => {
             if (src === 'fnos:accessible') return '系统授权';
             if (src === 'ugos:shared') return '绿联授权目录';
+            if (src === 'env:SCAN_PATHS' && data.platform === 'ugos') return '绿联应用配置';
             if (src && src.startsWith('env:')) return '环境变量';
             if (src && src.startsWith('auto:')) return '自动发现';
             return src || '-';

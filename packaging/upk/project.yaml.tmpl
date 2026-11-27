@@ -8,15 +8,35 @@ supports:
   - pc
   - app
 start_cmd: bin/spacemap
-port: 7080
+dynamic_port:
+  - key: http
+    protocol: tcp
+    scope: loopback
+    inject:
+      - type: env
+        name: PORT
 proxy_path: api
 open_type: inner
 tag_types:
   - utility
-depend_fw_version: 1.13.0.0000
+depend_fw_version: "1.18.0.0000"
 permissions:
   - NETWORK.ACCESS_INTERNET
 allow_add_access_path: true
+parameters:
+  - key: SCAN_PATHS
+    type: path
+    required: false
+    changeable: true
+    multi: true
+    max_values_count: 20
+    i18n:
+      en-US:
+        name: Scan Folders
+        description: Select one or more NAS folders to analyze (can be changed later in App Settings).
+      zh-CN:
+        name: 扫描文件夹
+        description: 选择需要分析空间的 NAS 文件夹，支持多选（安装后也可在应用配置中随时增删）。
 privacy_policy_link:
   - https://github.com/Danborad/spacemap
 license_agreement_link:
